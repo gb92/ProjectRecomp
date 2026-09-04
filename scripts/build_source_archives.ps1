@@ -22,6 +22,19 @@ $ZipPath = Join-Path $OutputDirectory "$ArchiveName.zip"
 $TarPath = Join-Path $OutputDirectory "$ArchiveName.tar.gz"
 $ChecksumPath = Join-Path $OutputDirectory "$ArchiveName-SHA256SUMS.txt"
 
+function Get-TarCommand {
+    $TarCommand = (Get-Command tar -ErrorAction Stop).Source
+    if ($env:OS -eq "Windows_NT") {
+        $GitCommand = (Get-Command git -ErrorAction Stop).Source
+        $GitRoot = Split-Path -Parent (Split-Path -Parent $GitCommand)
+        $GitTarCommand = Join-Path $GitRoot "usr\bin\tar.exe"
+        if (Test-Path -LiteralPath $GitTarCommand) {
+            return $GitTarCommand
+        }
+    }
+    return $TarCommand
+}
+
 function Invoke-Git {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
 
@@ -73,7 +86,8 @@ try {
     Compress-Archive -LiteralPath $StageDirectory `
         -DestinationPath $ZipPath -CompressionLevel Optimal
 
-    & tar -czf $TarPath -C $TemporaryRoot $ArchiveName
+    $TarCommand = Get-TarCommand
+    & $TarCommand -czf $TarPath -C $TemporaryRoot $ArchiveName
     if ($LASTEXITCODE) {
         throw "Creating the tar.gz archive failed with exit code $LASTEXITCODE."
     }
