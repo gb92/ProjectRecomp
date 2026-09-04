@@ -1,878 +1,541 @@
-# Xbox 360 Static Recompilation Guide
+# ProjectRecomp ReXGlue Workflow
 
-A practical walkthrough of using [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) and [XenosRecomp](https://github.com/hedge-dev/XenosRecomp) to statically recompile an Xbox 360 game's CPU code and GPU shaders for PC. This guide documents the steps taken while recompiling Tony Hawk's Project 8 and generalizes them for any Xbox 360 title.
+This document explains how Tony Hawk's Project 8 was brought up on
+[ReXGlue](https://github.com/rexglue/rexglue-sdk), how the current source tree
+fits together, and how to reproduce the generated code and native runtime.
 
-> **What is static recompilation?** Unlike emulation (which interprets instructions at runtime), static recompilation converts the entire game binary ahead of time into equivalent C++ source code that can be compiled natively for x86-64 or ARM64. The result is dramatically faster execution, but requires a custom runtime to provide the OS/hardware services the game expects.
+ProjectRecomp does not distribute the game executable or game assets. You must
+provide an extracted Xbox 360 retail disc. Only the unpatched base executable is
+supported:
 
----
+| Property | Value |
+|----------|-------|
+| Title | Tony Hawk's Project 8 |
+| Platform | Xbox 360 |
+| Executable revision | `0.0.0.1` |
+| `default.xex` size | 8,237,056 bytes |
+| `default.xex` SHA-256 | `CFC732340E55DEFDA400E25F03231AA9BB65FD9545B618212F69A4952384A5DD` |
+| Image base | `0x82000000` |
+| Entry point | `0x823AB9A0` |
 
-## Table of Contents
+Title updates are intentionally unsupported. THP8's known title update imposes
+an internal 30 FPS cap, and ReXGlue automatically applies a `default.xexp`
+located beside `default.xex`. Remove or rename that file before code generation
+or launch.
 
-1. [Prerequisites](#1-prerequisites)
-2. [Project Setup](#2-project-setup)
-3. [Building the Recompiler Tools](#3-building-the-recompiler-tools)
-4. [Obtaining Game Files](#4-obtaining-game-files)
-5. [Analyzing the XEX](#5-analyzing-the-xex)
-6. [CPU Recompilation (XenonRecomp)](#6-cpu-recompilation-xenonrecomp)
-7. [Shader Recompilation (XenosRecomp)](#7-shader-recompilation-xenosrecomp)
-8. [What Comes Next: The Runtime](#8-what-comes-next-the-runtime)
-9. [Troubleshooting & Game-Specific Issues](#9-troubleshooting--game-specific-issues)
-10. [Resources](#10-resources)
+## 1. What ReXGlue Provides
 
----
+Static recompilation converts the title's PowerPC code to native C++ ahead of
+time. The generated code still expects an Xbox 360 execution environment.
+ReXGlue supplies that environment:
 
-## 1. Prerequisites
+- XEX loading and guest-memory management
+- Xbox kernel and XAM services
+- virtual file-system mappings such as `game:\`
+- threads, events, critical sections, and TLS
+- SDL input and audio
+- XMA decoding
+- Xenos command processing and runtime shader translation
+- Direct3D 12 and Vulkan presentation
+- configuration, logging, and host UI support
 
-### Required Tools
+The active project therefore consists of three layers:
 
-| Tool | Version | Purpose |
-|------|---------|---------|
-| **CMake** | ≥ 3.20 | Build system for both recompilers |
-| **Clang** | ≥ 18 | C/C++ compiler (only tested/supported compiler) |
-| **Git** | Any | Clone repos with submodules |
-| **Python 3** | Any | Helper scripts for binary analysis |
+1. **Generated guest code** in `generated/`, produced from the user's XEX.
+2. **ReXGlue** in `tools/rexglue-sdk/`, pinned to a known commit and patched
+   reproducibly.
+3. **THP8 integration code** in `project/`, which configures ReXGlue and
+   overrides selected guest functions.
 
-On Windows, use the `clang-cl` toolset through Visual Studio 2022's CMake integration. On macOS/Linux, install Clang directly.
+The former hand-written runtime, checked-in XenonRecomp output, XenosRecomp
+workspace, and one-time XEX-analysis helpers are not part of the current build.
 
-### Recommended Tools
+## 2. Repository Layout
 
-| Tool | Purpose |
-|------|---------|
-| **Ghidra** (with Xbox 360 XEX loader) or **IDA Pro** | Disassembly and deeper analysis |
-| **A hex editor** (HxD, ImHex) | Manual byte pattern inspection |
-| **extract-xiso** or **xdvdfs** | Extracting Xbox 360 disc images |
-
-### What You Need From Your Game
-
-- **`default.xex`** — the main Xbox 360 executable
-- **`default.xexp`** (optional) — title update patch file
-- **Disc image or extracted game data** — for shader binaries and other assets
-
----
-
-## 2. Project Setup
-
-Create a directory structure to keep things organized:
-
+```text
+ProjectRecomp/
+├── config/
+│   └── THP8_rexglue.toml       # ReXGlue codegen manifest
+├── generated/                  # Codegen output; ignored by Git
+├── patches/
+│   └── rexglue-v0.10.0/        # Ordered SDK compatibility patches
+├── private/                    # User-owned game files; ignored by Git
+│   └── unpatched-game-full/
+│       ├── default.xex
+│       └── DATA/
+├── project/
+│   ├── assets/                 # Project-authored QB replacements
+│   ├── src/                    # ReXGlue app and guest overrides
+│   └── CMakeLists.txt
+├── scripts/
+│   ├── apply-rexglue-patches.sh
+│   ├── import_game.py
+│   └── run_thp8.py
+└── tools/
+    └── rexglue-sdk/             # The only required submodule
 ```
-your-game-recomp/
-├── config/           # TOML config files for the recompilers
-├── ppc/              # XenonRecomp C++ output (generated)
-├── private/          # Your game files (XEX, ISO, etc.)
-├── shaders/          # Shader extraction/recompilation workspace
-├── tools/            # Recompiler tools (cloned repos)
-│   ├── XenonRecomp/
-│   ├── XenosRecomp/
-│   └── xex_dump/     # Custom helper tool (see below)
-└── docs/
+
+`generated/` is intentionally excluded from Git because it is large and is
+derived from copyrighted input. A source build requires the contributor to run
+codegen against their own supported XEX.
+
+## 3. Prepare the Game
+
+Extract your legally acquired Xbox 360 disc with a tool such as
+[`extract-xiso`](https://github.com/XboxDev/extract-xiso) or
+[`xdvdfs`](https://crates.io/crates/xdvdfs-cli). For development, use this
+layout:
+
+```text
+private/unpatched-game-full/
+├── default.xex
+└── DATA/
 ```
+
+Do not place `default.xexp` beside the executable. Validate the extracted game
+with the project importer:
 
 ```bash
-mkdir -p your-game-recomp/{config,ppc,private,shaders,tools,docs}
+python scripts/import_game.py private/unpatched-game-full --dry-run
 ```
 
----
+The normal end-user importer copies game data to a per-user library. Codegen,
+however, uses the development path declared in `config/THP8_rexglue.toml`.
 
-## 3. Building the Recompiler Tools
+## 4. Build the Pinned ReXGlue SDK
 
-### XenonRecomp (CPU: PPC → C++)
+Initialize the only required submodule:
 
 ```bash
-cd your-game-recomp/tools
-git clone --recursive https://github.com/hedge-dev/XenonRecomp.git
-cd XenonRecomp
-mkdir build && cd build
-cmake .. -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Release
-cmake --build . --config Release
+git submodule update --init --recursive tools/rexglue-sdk
 ```
 
-This produces two executables:
-- **`XenonAnalyse`** — scans an XEX for jump tables, outputs a TOML file
-- **`XenonRecomp`** — converts XEX → C++ source files
+The project currently pins ReXGlue commit
+`4c1350847bb2bbc5fbf4272c78731632fccce8ab`. The same commit is recorded in
+`project/CMakeLists.txt` and `scripts/apply-rexglue-patches.sh`; a mismatch is a
+hard error.
 
-### XenosRecomp (GPU: Xenos shaders → HLSL)
+On Linux:
 
 ```bash
-cd your-game-recomp/tools
-git clone --recursive https://github.com/hedge-dev/XenosRecomp.git
-cd XenosRecomp
-mkdir build && cd build
-cmake .. -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Release
-cmake --build . --config Release
+cmake --preset linux-amd64 -S tools/rexglue-sdk
+cmake --build tools/rexglue-sdk/out/build/linux-amd64 \
+  --config Release --target install -j8
 ```
 
-Produces **`XenosRecomp`** — converts Xbox 360 shader binaries → HLSL.
+On Windows, run the equivalent `win-amd64` preset from a Visual Studio 2022
+x64 developer environment:
 
-### xex_dump (Helper: decompress XEX + find register functions)
-
-XEX files are typically compressed and/or encrypted. The recompiler tools handle this internally, but to search the decompressed code for byte patterns you need a helper tool.
-
-Build one using XenonRecomp's `XenonUtils` library. A minimal implementation:
-
-```cpp
-// main.cpp — loads and decompresses an XEX, then searches for
-// register save/restore function byte patterns.
-#include <cstdio>
-#include <cstring>
-#include <fstream>
-#include <vector>
-#include "image.h"
-#include "xex.h"
-
-int main(int argc, char* argv[]) {
-    if (argc < 3) {
-        fprintf(stderr, "Usage: xex_dump <input.xex> <output.bin>\n");
-        return 1;
-    }
-
-    std::ifstream in(argv[1], std::ios::binary | std::ios::ate);
-    size_t fileSize = in.tellg();
-    in.seekg(0);
-    std::vector<uint8_t> fileData(fileSize);
-    in.read(reinterpret_cast<char*>(fileData.data()), fileSize);
-    in.close();
-
-    Image image = Xex2LoadImage(fileData.data(), fileSize);
-
-    printf("Base address: 0x%08zX\n", image.base);
-    printf("Entry point:  0x%08zX\n", image.entry_point);
-    printf("Image size:   0x%X (%u bytes)\n", image.size, image.size);
-
-    // Dump decompressed image
-    std::ofstream out(argv[2], std::ios::binary);
-    out.write(reinterpret_cast<const char*>(image.data.get()), image.size);
-
-    // Search for register save/restore patterns
-    struct Pattern {
-        const char* name;
-        const uint8_t* bytes;
-        size_t len;
-    };
-    const uint8_t restgprlr[] = {0xe9, 0xc1, 0xff, 0x68};
-    const uint8_t savegprlr[] = {0xf9, 0xc1, 0xff, 0x68};
-    const uint8_t restfpr[]   = {0xc9, 0xcc, 0xff, 0x70};
-    const uint8_t savefpr[]   = {0xd9, 0xcc, 0xff, 0x70};
-    const uint8_t restvmx14[] = {0x39, 0x60, 0xfe, 0xe0, 0x7d, 0xcb, 0x60, 0xce};
-    const uint8_t savevmx14[] = {0x39, 0x60, 0xfe, 0xe0, 0x7d, 0xcb, 0x61, 0xce};
-    const uint8_t restvmx64[] = {0x39, 0x60, 0xfc, 0x00, 0x10, 0x0b, 0x60, 0xcb};
-    const uint8_t savevmx64[] = {0x39, 0x60, 0xfc, 0x00, 0x10, 0x0b, 0x61, 0xcb};
-
-    Pattern patterns[] = {
-        {"restgprlr_14_address", restgprlr, 4},
-        {"savegprlr_14_address", savegprlr, 4},
-        {"restfpr_14_address",   restfpr,   4},
-        {"savefpr_14_address",   savefpr,   4},
-        {"restvmx_14_address",   restvmx14, 8},
-        {"savevmx_14_address",   savevmx14, 8},
-        {"restvmx_64_address",   restvmx64, 8},
-        {"savevmx_64_address",   savevmx64, 8},
-    };
-
-    for (const auto& pat : patterns) {
-        for (size_t i = 0; i <= image.size - pat.len; i++) {
-            if (memcmp(image.data.get() + i, pat.bytes, pat.len) == 0) {
-                uint32_t va = (uint32_t)image.base + (uint32_t)i;
-                printf("%s = 0x%08X\n", pat.name, va);
-                break;
-            }
-        }
-    }
-    return 0;
-}
+```powershell
+cmake --preset win-amd64 -S tools\rexglue-sdk
+cmake --build tools\rexglue-sdk\out\build\win-amd64 `
+  --config Release --target install -j8
 ```
 
-Link it against XenonUtils sources and the required thirdparty libraries (libmspack, tiny-AES-c, TinySHA1, xxHash). See the `CMakeLists.txt` in this project's `tools/xex_dump/` for the complete build configuration.
+Clang is required for the project build. The current Windows build is known to
+work with Clang 19 and the Visual Studio 2022 v143 toolset.
 
----
+## 5. Understand the ReXGlue Manifest
 
-## 4. Obtaining Game Files
+`config/THP8_rexglue.toml` is the canonical description of the guest image.
+Its important sections are:
 
-### From a Retail Disc
-
-1. **Dump the disc** using an Xbox 360 with RGH/JTAG or compatible disc drive + PC software. You'll get an ISO image.
-2. **Extract the ISO** using `extract-xiso` or `xdvdfs`:
-   ```bash
-   # extract-xiso (supports both OG Xbox and Xbox 360)
-   extract-xiso -d output_folder game.iso
-   
-   # xdvdfs (Rust-based alternative)
-   cargo install xdvdfs-cli
-   xdvdfs unpack game.iso output_folder
-   ```
-3. **Locate key files:**
-   - `default.xex` — the main executable (always at the ISO root)
-   - `default.xexp` — title update patch (if applicable)
-   - Game data directories — vary by game engine
-
-### Title Updates
-
-If you have a title update `.xexp` file, XenonRecomp can apply it automatically. Place it alongside `default.xex` and reference it in your TOML config. XenonRecomp will produce a `patched_file_path` output that combines both.
-
----
-
-## 5. Analyzing the XEX
-
-This is where you extract the information XenonRecomp needs to do its job. There are 8 register save/restore function addresses and potentially `setjmp`/`longjmp` addresses to find.
-
-### Step 1: Run xex_dump
-
-```bash
-./xex_dump private/default.xex private/default_decompressed.bin
-```
-
-This will:
-- Decompress and decrypt the XEX
-- Print the base address, entry point, and image size
-- Search for all 8 register save/restore function byte patterns
-- Output the virtual addresses ready for your TOML config
-
-**Example output (from Tony Hawk's Project 8):**
-```
-Base address: 0x82000000
-Entry point:  0x823AC158
-Image size:   0xA80000 (11010048 bytes)
-
-restgprlr_14_address = 0x8262BC50
-savegprlr_14_address = 0x8262BC00
-restfpr_14_address = 0x8262C7CC
-savefpr_14_address = 0x8262C780
-restvmx_14_address = 0x82631838
-savevmx_14_address = 0x826315A0
-restvmx_64_address = 0x826318CC
-savevmx_64_address = 0x82631634
-```
-
-> **What are these functions?** Xbox 360 executables use standardized register save/restore routines inherited from the PowerPC ABI. Every function that uses non-volatile registers calls these to save them on entry and restore on exit. The recompiler needs their addresses to generate correct code for these special routines, which work like switch-case fallthroughs.
-
-### Step 2: Find setjmp/longjmp (optional)
-
-If the game uses `setjmp`/`longjmp` (for non-local jumps or error recovery), you need their addresses too. Look for references to `RtlUnwind` in a disassembler — `longjmp` typically calls it, and `setjmp` is nearby.
-
-If unsure, omit them from the config — the recompiler will still work, and you'll discover at runtime if they're needed.
-
-### Step 3: Run XenonAnalyse (jump table detection)
-
-```bash
-./XenonAnalyse private/default.xex config/switch_tables.toml
-```
-
-This scans the executable for jump table patterns and outputs a TOML file that XenonRecomp uses to convert them into proper `switch` statements.
-
-**Important:** XenonAnalyse's detection logic was written for Sonic Unleashed. Different games (especially those compiled with different versions of the Xbox 360 compiler) may have different jump table patterns. You may see:
-- **Missing jump tables** — warnings like "Found a switch jump table with no switch table entry present"
-- **Boundary errors** — "Switch case is trying to jump outside function"
-
-These indicate places where you'll need to either modify XenonAnalyse or manually add entries to your TOML config.
-
-**THP8 results:** XenonAnalyse found thousands of jump tables successfully (13,800+ lines of TOML), though ~25 tables were missed and ~100 had boundary issues — typical for a first pass on a new game.
-
-### Understanding the Byte Patterns
-
-Here's what each pattern represents in PowerPC assembly:
-
-| TOML Key | PPC Instruction | Byte Pattern | Purpose |
-|----------|----------------|--------------|---------|
-| `restgprlr_14_address` | `ld r14, -0x98(r1)` | `e9 c1 ff 68` | Restore general-purpose registers + link register |
-| `savegprlr_14_address` | `std r14, -0x98(r1)` | `f9 c1 ff 68` | Save general-purpose registers + link register |
-| `restfpr_14_address` | `lfd f14, -0x90(r12)` | `c9 cc ff 70` | Restore floating-point registers |
-| `savefpr_14_address` | `stfd f14, -0x90(r12)` | `d9 cc ff 70` | Save floating-point registers |
-| `restvmx_14_address` | `li r11, -0x120; lvx v14, r11, r12` | `39 60 fe e0 7d cb 60 ce` | Restore VMX (SIMD) registers 14–63 |
-| `savevmx_14_address` | `li r11, -0x120; stvx v14, r11, r12` | `39 60 fe e0 7d cb 61 ce` | Save VMX registers 14–63 |
-| `restvmx_64_address` | `li r11, -0x400; lvx128 v64, r11, r12` | `39 60 fc 00 10 0b 60 cb` | Restore VMX128 registers 64+ |
-| `savevmx_64_address` | `li r11, -0x400; stvx128 v64, r11, r12` | `39 60 fc 00 10 0b 61 cb` | Save VMX128 registers 64+ |
-
-These patterns are consistent across Xbox 360 titles because they come from the standard runtime library linked into every executable.
-
----
-
-## 6. CPU Recompilation (XenonRecomp)
-
-### Step 1: Create the TOML Config
-
-Create a TOML file (e.g., `config/YourGame.toml`) with the information gathered in the analysis step:
+### Project and paths
 
 ```toml
-[main]
-file_path = "../private/default.xex"
-# patch_file_path = "../private/default.xexp"        # Uncomment if you have a title update
-# patched_file_path = "../private/default_patched.xex"  # Auto-generated by XenonRecomp
-out_directory_path = "../ppc"
-switch_table_file_path = "switch_tables.toml"
+[project]
+name = "thp8"
+sdk_version = "0.10.0"
 
-# Start with ALL optimizations OFF
-skip_lr = false
-skip_msr = false
-ctr_as_local = false
-xer_as_local = false
-reserved_as_local = false
-cr_as_local = false
-non_argument_as_local = false
-non_volatile_as_local = false
-
-# Paste the addresses from xex_dump output
-restgprlr_14_address = 0x????????
-savegprlr_14_address = 0x????????
-restfpr_14_address = 0x????????
-savefpr_14_address = 0x????????
-restvmx_14_address = 0x????????
-savevmx_14_address = 0x????????
-restvmx_64_address = 0x????????
-savevmx_64_address = 0x????????
-
-# Uncomment if the game uses setjmp/longjmp
-# longjmp_address = 0x????????
-# setjmp_address = 0x????????
+[entrypoint]
+file_path = "../private/unpatched-game-full/default.xex"
+out_directory_path = "../generated"
 ```
 
-**Optimization notes:** Keep all optimizations off until you have a working recompilation. Once things are running, you can enable them one at a time (see [XenonRecomp README](https://github.com/hedge-dev/XenonRecomp#optimizations) for details). The `non_volatile_as_local` optimization alone can reduce executable size by ~20 MB and improve frame times significantly.
+Paths are relative to the manifest. The project name determines generated
+filenames and the native module name.
 
-### Step 2: Create the Output Directory and Run
+### Register-local optimization
 
-```bash
-mkdir -p ppc
-./tools/XenonRecomp/build/XenonRecomp/XenonRecomp config/YourGame.toml tools/XenonRecomp/XenonUtils/ppc_context.h
-```
+The manifest currently uses conservative settings: PowerPC state remains in
+`PPCContext` rather than being aggressively promoted to C++ locals. This keeps
+behavior predictable while function boundaries and runtime behavior are still
+being validated.
 
-### Step 3: Examine the Output
+Optimization flags change generated calling assumptions. Treat changes to
+`*_as_local`, `skip_*`, or exception-handler generation as ABI changes and
+regenerate all output.
 
-XenonRecomp generates:
-
-| File | Purpose |
-|------|---------|
-| `ppc_config.h` | Image base, code base, size macros |
-| `ppc_context.h` | `PPCContext` struct (all CPU registers, CR, XER, etc.) |
-| `ppc_recomp_shared.h` | Shared macros and declarations for all recompiled functions |
-| `ppc_func_mapping.cpp` | Maps original addresses → recompiled function pointers |
-| `ppc_recomp.N.cpp` | The actual recompiled functions (many files, split for parallel compilation) |
-
-**What the recompiled code looks like:**
-
-```cpp
-PPC_FUNC_IMPL(__imp__sub_82090020) {
-    PPC_FUNC_PROLOGUE();
-    // lis r11,-32105
-    ctx.r11.s64 = -2104033280;
-    // mr r4,r3
-    ctx.r4.u64 = ctx.r3.u64;
-    // lwz r3,5032(r11)
-    ctx.r3.u64 = PPC_LOAD_U32(ctx.r11.u32 + 5032);
-    // b 0x823996d8
-    sub_823996D8(ctx, base);
-    return;
-}
-
-PPC_WEAK_FUNC(sub_82090020) {
-    __imp__sub_82090020(ctx, base);
-}
-```
-
-Key things to notice:
-- Every function takes `PPCContext& ctx` (register state) and `uint8_t* base` (guest memory pointer)
-- Original PPC instructions appear as comments above their C++ translations
-- Memory loads/stores include endianness swapping (`PPC_LOAD_U32` etc.)
-- The `PPC_WEAK_FUNC` pattern enables hooking — you can override any function in your runtime
-- Indirect calls use a "perfect hash table" lookup at runtime
-
-### Common Warnings and How to Fix Them
-
-**"Switch case is trying to jump outside function"**
-The function boundary analyzer got the function's extent wrong — the jump table targets land outside what XenonAnalyse thinks is the function. Fix by adding explicit function boundaries:
+### Analysis controls
 
 ```toml
-functions = [
-    { address = 0x821EF000, size = 0x300 },
-]
+[entrypoint.analysis]
+max_jump_extension = 65536
+data_region_threshold = 16
 ```
 
-**"Found a switch jump table with no switch table entry present"**
-A jump table was detected during recompilation but wasn't in the switch tables TOML. Either XenonAnalyse missed it or it uses a pattern the analyzer doesn't recognize. Add it manually:
+ReXGlue discovers code and jump targets automatically. These values let the
+analyzer follow THP8's larger control-flow regions without treating embedded
+data as executable code too aggressively.
+
+### Explicit function boundaries
 
 ```toml
-[[switch]]
-base = 0x823BA1FC
-r = 0          # register number containing the index
-default = 0x????????
-labels = [
-    0x????????,
-    0x????????,
-]
+[entrypoint.functions]
+0x8241F518 = {}
+0x8241FE90 = { parent = 0x8241F8D0 }
+0x8237B458 = { end = 0x8237B48C }
 ```
 
-**"Unrecognized instruction"**
-An instruction the recompiler doesn't support. Common ones for THP8 included `vandc`, `vsel128`, `vctuxs`, `lhbrx`, `dcbst`, `mulhdu`, `frsqrte`. These would need to be implemented in XenonRecomp's instruction translator for full correctness. A `__debugbreak()` is inserted at these locations.
+The table records boundaries that automatic analysis cannot infer reliably:
 
----
+- `{}` declares a standalone function entry.
+- `parent` declares a callable entry inside a larger discovered function.
+- `end` constrains a function whose inferred extent overlaps data or another
+  function.
 
-## 7. Shader Recompilation (XenosRecomp)
+This table replaced the old workflow of maintaining separate XenonAnalyse
+jump-table files. Entries were accumulated by correlating runtime failures,
+ReXGlue logs, generated call sites, and disassembly of the supported base XEX.
 
-XenosRecomp converts Xbox 360 (Xenos GPU) shader binaries into HLSL, which can then be compiled to DXIL (D3D12) or SPIR-V (Vulkan) using the DirectX Shader Compiler (DXC).
+When adding an entry:
 
-### Finding Shader Binaries
+1. Confirm the address against the supported unpatched XEX.
+2. Determine whether it is a real function, an internal entry point, or a
+   bounded fragment.
+3. Add the narrowest correct declaration.
+4. Regenerate all code.
+5. Rebuild and exercise the path that exposed the missing boundary.
 
-Xbox 360 shaders may be stored in:
-- **The XEX executable itself** — embedded directly in the binary
-- **Game data archives** — engine-specific formats
-- **Standalone files** — less common
+Do not copy addresses from a patched executable. Title updates move functions
+and invalidate native overrides.
 
-XenosRecomp scans for shaders using the magic bytes `0x102A1100` (big-endian) in the `ShaderContainer` header. It searches every 4-byte boundary in each file.
+## 6. Generate the Guest Code
 
-**For single shader conversion:**
-```bash
-./XenosRecomp input_shader.bin output.hlsl tools/XenosRecomp/XenosRecomp/shader_common.h
-```
-
-**For directory scanning (batch mode):**
-```bash
-./XenosRecomp shader_directory/ output_cache.cpp tools/XenosRecomp/XenosRecomp/shader_common.h
-```
-
-The directory scanner recursively walks all files, looking for the `0x102A1100` magic at every 4-byte boundary. Multiple shaders can be embedded in a single file.
-
-### Game-Specific Shader Formats
-
-**This is the part most likely to require custom work.** Different game engines store shaders differently:
-
-- **Games using standard Xbox 360 D3D containers** (e.g., Sonic Unleashed) — XenosRecomp works out of the box
-- **Games using custom containers** (e.g., Tony Hawk's Project 8 with Neversoft's `MATL` format) — the compiled shader bytecode is wrapped in a proprietary format and XenosRecomp won't find the magic bytes
-
-For THP8, we found that `MaterialLibrary.bin.xen` contains 1,180 compiled shaders (both vertex and pixel shaders, shader model 3.0) compiled by "Microsoft (R) Xbox 360 Shader Compiler 2.0.3424.0". However, they're wrapped in Neversoft's `MATL` container rather than the standard Xbox 360 shader container format.
-
-**How to check if your game's shaders are compatible:**
-
-```python
-# Scan a file for XenosRecomp-compatible shader containers
-import struct
-
-with open("game_file.bin", "rb") as f:
-    data = f.read()
-
-count = 0
-i = 0
-while i < len(data) - 36:
-    flags = struct.unpack('>I', data[i:i+4])[0]
-    if (flags & 0xFFFFFF00) == 0x102A1100:
-        vsize = struct.unpack('>I', data[i+4:i+8])[0]
-        psize = struct.unpack('>I', data[i+8:i+12])[0]
-        f1c = struct.unpack('>I', data[i+0x1C:i+0x20])[0]
-        f20 = struct.unpack('>I', data[i+0x20:i+0x24])[0]
-        total = vsize + psize
-        if f1c == 0 and f20 == 0 and total > 0 and (i + total) <= len(data):
-            stype = "VS" if (flags & 1) else "PS"
-            print(f"{stype} shader at 0x{i:X}, size {total}")
-            count += 1
-            i += total
-            continue
-    i += 4
-
-print(f"Found {count} shaders")
-```
-
-If this finds zero results, you'll need to reverse-engineer the game's shader container format. Look for:
-- The string "Xbox 360 Shader Compiler" — a strong indicator of compiled shader data nearby
-- Constant names like `g_ViewProj`, `g_World`, sampler references
-- The byte sequence `vs_3_0` or `ps_3_0` (shader model identifiers)
-
-### Compiling HLSL Output
-
-Once XenosRecomp produces HLSL files, compile them with DXC:
+After installing the SDK, run:
 
 ```bash
-# For D3D12
-dxc -T vs_6_0 -E main shader_vs.hlsl -Fo shader_vs.dxil
-dxc -T ps_6_0 -E main shader_ps.hlsl -Fo shader_ps.dxil
-
-# For Vulkan
-dxc -T vs_6_0 -E main shader_vs.hlsl -spirv -Fo shader_vs.spv
-dxc -T ps_6_0 -E main shader_ps.hlsl -spirv -Fo shader_ps.spv
+tools/rexglue-sdk/out/install/linux-amd64/bin/rexglue \
+  codegen config/THP8_rexglue.toml
 ```
 
----
+On Windows:
 
-## 8. What Comes Next: The Runtime
-
-The recompiled C++ code is just the game's logic translated to a new instruction set. It won't run without a **runtime** — the layer that provides everything the original Xbox 360 OS and hardware provided.
-
-This is by far the most complex part of a recompilation project. Here's what you need and how to build a minimal version.
-
-> **Historical design notes:** Sections 8.1–8.9 describe the standalone
-> prototype used early in ProjectRecomp. That prototype is no longer included
-> or supported. The active project uses ReXGlue as described in section 8.10.
-
-### 8.1. Project Structure
-
-```
-runtime/
-├── CMakeLists.txt          # Build system
-└── src/
-    ├── main.cpp            # Entry: allocates memory, loads image, sets up dispatch, executes
-    ├── memory.h / .cpp     # Cross-platform guest memory (mmap / VirtualAlloc)
-    ├── dispatch.h / .cpp   # Function dispatch table setup from PPCFuncMappings
-    └── kernel_stubs.cpp    # Stub implementations for Xbox 360 kernel functions
+```powershell
+tools\rexglue-sdk\out\install\win-amd64\bin\rexglue.exe `
+  codegen config\THP8_rexglue.toml
 ```
 
-### 8.2. Guest Memory Layout
+Codegen writes:
 
-The recompiled code accesses memory as `base[guest_addr]`, where `guest_addr` is a 32-bit Xbox 360 virtual address (typically around `0x82000000`). This means `base` must point to an allocation large enough that `base + 0x82000000 + image_size + dispatch_size` is valid.
-
-```
-base[0x00000000]  ────────────  Start of allocation
-     ...
-base[0x70000000]  ────────────  Guest stack (1 MB)
-     ...
-base[0x82000000]  ────────────  XEX image loaded here (PPC_IMAGE_BASE)
-base[0x82090000]  ────────────  Code section start (PPC_CODE_BASE)
-base[0x826CD884]  ────────────  Code section end
-base[0x82A80000]  ────────────  Dispatch table start (PPC_IMAGE_BASE + PPC_IMAGE_SIZE)
-base[0x836FB108]  ────────────  Dispatch table end
+```text
+generated/
+├── sources.cmake          # Complete source list consumed by project CMake
+├── thp8_pch.h             # PPC context, image constants, and memory helpers
+├── thp8_init.cpp/.h       # Image metadata and module initialization
+├── thp8_register.cpp      # Guest-function registration
+├── thp8_funcs.N.h         # Generated declarations
+└── thp8_recomp.N.cpp      # Recompiled PowerPC functions
 ```
 
-**Total allocation needed:** ~2.1 GB. Use `mmap` with `MAP_NORESERVE` (Linux) or `MAP_ANON` (macOS) to reserve virtual address space without committing physical memory upfront. On Windows, use `VirtualAlloc` with `MEM_RESERVE | MEM_COMMIT`.
+Codegen also records dependency, partition, and output-stamp metadata used to
+make subsequent runs deterministic and incremental.
 
-**Key requirements:**
-- The `base` pointer must be **32-byte aligned** (enforced by `PPC_FUNC_PROLOGUE()`)
-- `mmap` and `VirtualAlloc` return page-aligned pointers, so this is automatic
+Never hand-edit generated files. Make analyzer changes in
+`config/THP8_rexglue.toml`, make runtime behavior changes in `project/src/`,
+then rerun codegen.
 
-### 8.3. Function Dispatch Table
+ReXGlue's `PPCContext` is part of its runtime ABI. Output from the historical
+standalone XenonRecomp pipeline cannot be mixed with this generated tree.
 
-The recompiled code uses a "perfect hash table" for indirect function calls (virtual functions, function pointers). The dispatch table lives immediately after the XEX image in guest memory:
+## 7. Apply the Project's ReXGlue Patch Stack
 
+ProjectRecomp carries an ordered patch stack in `patches/rexglue-v0.10.0/`.
+The patches contain fixes and hooks that are not yet available in the pinned
+SDK, including:
+
+- local-content and file-delete correctness
+- project-side ImGui context access
+- POSIX shared-memory, wait, memory-map, and write-watch improvements
+- VSync and frame-metric corrections
+- incremental GPU read-pointer updates
+- configured function-chunk handling
+- performance-counter CSV wiring
+- separation of guest vblank timing from host VSync
+
+`project/CMakeLists.txt` verifies the SDK commit and applies each patch in
+filename order during configuration. It accepts either a pristine SDK or one
+with the complete patch already applied. A conflicting partial state stops the
+configure step.
+
+The patch stack can also be applied explicitly on Unix:
+
+```bash
+scripts/apply-rexglue-patches.sh tools/rexglue-sdk
 ```
-dispatch_addr = base + PPC_IMAGE_BASE + PPC_IMAGE_SIZE + (guest_addr - PPC_CODE_BASE) * 2
-```
 
-The `* 2` maps each 4-byte PPC instruction address to an 8-byte function pointer slot (on 64-bit hosts). Populate it by iterating `PPCFuncMappings[]`:
+Because patches are applied in place, `git status` may show
+`tools/rexglue-sdk` as modified after configuration. Do not commit those
+submodule worktree changes; commit changes to the corresponding patch file.
+
+When updating the ReXGlue pin:
+
+1. Start from a clean submodule checkout.
+2. Update the expected commit in `.gitmodules`/the gitlink,
+   `project/CMakeLists.txt`, and `scripts/apply-rexglue-patches.sh`.
+3. Rebase or regenerate every required patch against the new commit.
+4. Apply the complete stack to a pristine checkout.
+5. Regenerate the guest code.
+6. Build and perform startup-to-gameplay validation on Windows and Linux.
+
+## 8. Integrate Generated Code with the Native App
+
+`project/CMakeLists.txt` performs the active integration:
+
+1. Verify and patch the pinned ReXGlue source.
+2. Add ReXGlue with `add_subdirectory`.
+3. require `generated/sources.cmake`.
+4. Build `thp8` from the native app plus `${GENERATED_SOURCES}`.
+5. Link `rex::runtime`, ImGui, and the Xenos GPU plugin.
+6. Package the executable, ReXGlue DLLs, and app-local Visual C++ runtime files
+   on Windows.
+
+Configuration fails with an actionable message if codegen has not been run.
+
+The app entry point is deliberately small:
 
 ```cpp
-for (size_t i = 0; PPCFuncMappings[i].host != nullptr; ++i) {
-    uint32_t guest_addr = PPCFuncMappings[i].guest;
-    uint64_t offset = (guest_addr - PPC_CODE_BASE) * 2;
-    PPCFunc** slot = (PPCFunc**)(dispatch_base + offset);
-    *slot = PPCFuncMappings[i].host;
+#include "thp8_init.h"
+#include "thp8_app.h"
+
+REX_DEFINE_APP(thp8, THP8App::Create)
+```
+
+`THP8App` derives from `rex::ReXApp` and configures title-specific behavior:
+
+- `OnPreSetup` selects the `xenos` GPU plugin.
+- `OnConfigurePaths` locates imported or developer game data.
+- `OnPostSetup` and `OnShutdown` manage title-specific host UI state.
+- `OnLoadXexImage` keeps the standard `default.xex` path.
+
+The runtime search order supports:
+
+1. executable-adjacent `game/`
+2. executable-adjacent `game_data/`
+3. the platform's installed-game library
+4. the executable directory
+5. `private/unpatched-game-full/` for development
+
+## 9. Override Guest Functions Safely
+
+Generated guest functions use:
+
+```cpp
+extern "C" REX_FUNC(sub_8235F2A8);
+```
+
+The macro provides a `PPCContext& ctx` and guest-memory base pointer. Arguments
+and return values follow the PowerPC ABI through `ctx.r3` onward.
+
+To wrap a generated function, declare its generated implementation with the
+`__imp__` prefix, then provide the public symbol:
+
+```cpp
+extern "C" REX_FUNC(__imp__sub_8235F2A8);
+
+extern "C" REX_FUNC(sub_8235F2A8) {
+    REX_FUNC_PROLOGUE();
+    const uint32_t output = ctx.r3.u32;
+    __imp__sub_8235F2A8(ctx, base);
+    // Apply the narrowly scoped title fix.
 }
 ```
 
-### 8.4. PPCContext Initialization
+Use ReXGlue's endian-aware guest-memory helpers:
 
 ```cpp
-PPCContext ctx{};
-memset(&ctx, 0, sizeof(ctx));
-ctx.msr = 0x200A000;              // Default machine state register
-ctx.r1.u64 = stack_top;           // Stack pointer (grows downward)
-// r2 = TOC pointer, r13 = SDA pointer (set from XEX headers if needed)
+const uint32_t value = REX_LOAD_U32(guest_address);
+REX_STORE_U32(guest_address, value);
 ```
 
-### 8.5. Xbox 360 Kernel Stubs
+Do not dereference guest addresses as host pointers or assume little-endian
+layout. Keep overrides tied to the exact supported XEX revision and document
+the behavior that requires each hook.
 
-The recompiled code calls Xbox 360 kernel functions by name. Thanks to the weak linkage pattern, you can override any function by defining `PPC_FUNC_IMPL(FunctionName)`.
+`project/src/stubs.cpp` contains historical patched-build experiments and is
+intentionally excluded from the target. Active unpatched-build overrides live
+in `project/src/thp8_app.cpp`.
 
-**For Tony Hawk's Project 8, 234 kernel functions needed stubs**, spanning:
+## 10. THP8-Specific Bring-Up Work
 
-| Category | Count | Examples |
-|----------|-------|---------|
-| NT Kernel | ~30 | `NtCreateFile`, `NtReadFile`, `NtAllocateVirtualMemory` |
-| Kernel Executive | ~25 | `KeWaitForSingleObject`, `KeDelayExecutionThread` |
-| Runtime Library | ~15 | `RtlInitializeCriticalSection`, `RtlEnterCriticalSection` |
-| Memory Manager | ~8 | `MmAllocatePhysicalMemoryEx`, `MmFreePhysicalMemory` |
-| Video Driver | ~20 | `VdInitializeEngines`, `VdSwap`, `VdSetDisplayMode` |
-| Xbox App Manager | ~40 | `XamInputGetState`, `XamShowSigninUI` |
-| XAudio/XMA | ~20 | `XMACreateContext`, `XAudioSubmitRenderDriverFrame` |
-| Networking | ~25 | `NetDll_socket`, `NetDll_connect`, `NetDll_send` |
-| C Runtime | ~3 | `sprintf`, `_vsnprintf` |
+ReXGlue supplied the platform runtime, but reaching a polished game still
+required title-specific integration:
 
-**Auto-generating stubs:** A prototype runtime can use the linker's undefined
-symbol output to identify the stubs it needs:
+### Function discovery
+
+Automatic analysis missed several call targets and internal entries. Runtime
+failures were traced back to disassembly, then fixed with explicit
+`[entrypoint.functions]` declarations. One incorrect function extent required
+an explicit `end`.
+
+### Main-menu and options integration
+
+THP8's menus are QB scripts loaded through a guest script cache. ProjectRecomp
+wraps the cache lookup, recognizes the expected retail payload, and substitutes
+project-authored scripts embedded at build time. Native command references are
+resolved from the live guest symbol table rather than hard-coded as host
+addresses.
+
+This approach preserves the retail menu flow while adding:
+
+- a reliable Quit action
+- a Graphics entry in the existing Options menu
+- a host-side ImGui settings dialog
+
+### Rendering and loading UI
+
+Guest-function wrappers select known THP8 render descriptors and adjust loading
+screen geometry. Only modes backed by valid retail descriptors are exposed.
+ReXGlue's internal resolution scaling remains integer-based; arbitrary output
+window scaling is separate.
+
+### Timing
+
+THP8 normally renders every other 60 Hz guest vblank. Project-specific ReXGlue
+patches separate guest timing from host presentation so VSync can control
+tearing without silently changing guest timing. Experimental 60 FPS operation
+uses a 120 Hz guest video mode and still requires game-wide validation.
+
+### Shaders
+
+No generated shader source or shader cache is checked into this repository.
+ReXGlue's Xenos plugin translates the game's shaders at runtime and maintains
+its own cache. The old XenosRecomp submodule and empty `shaders/` workspace were
+therefore removed.
+
+## 11. Configure and Build ProjectRecomp
+
+After codegen, configure the native project.
+
+Linux:
 
 ```bash
-# Build and capture undefined symbols for a project-specific generator
-cmake --build . 2>&1 | grep "referenced from" | \
-    sed 's/.*"__imp__//' | sed 's/(PPCContext.*//' | sort -u > missing_symbols.txt
+cmake -S project -B project/build -G Ninja \
+  -DCMAKE_C_COMPILER=clang \
+  -DCMAKE_CXX_COMPILER=clang++ \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build project/build -j8
 ```
 
-Each stub logs its name on first call and returns 0 (success):
+Windows, from a Visual Studio x64 developer environment:
 
-```cpp
-PPC_FUNC(__imp__NtReadFile) {
-    PPC_FUNC_PROLOGUE();
-    static bool logged = false;
-    if (!logged) { fprintf(stderr, "STUB: NtReadFile called\n"); logged = true; }
-    ctx.r3.u64 = 0; // STATUS_SUCCESS
-}
+```powershell
+cmake -S project -B project\build -G Ninja `
+  -DCMAKE_C_COMPILER=clang `
+  -DCMAKE_CXX_COMPILER=clang++ `
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build project\build -j8
 ```
 
-### 8.6. CMake Build Setup
+The project targets the `x86-64-v2` architecture baseline. Windows binaries use
+the dynamic MSVC runtime because allocations cross executable/DLL boundaries.
+The installer stages the matching release CRT DLLs app-locally.
 
-```cmake
-cmake_minimum_required(VERSION 3.16)
-project(your_game_runtime CXX)
-set(CMAKE_CXX_STANDARD 17)
+## 12. Run and Debug
 
-# Require Clang (weak attribute not supported by MSVC)
-if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    message(FATAL_ERROR "This project requires Clang")
-endif()
-
-# Paths
-set(PPC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ppc")
-set(SIMDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tools/XenonRecomp/thirdparty/simde")
-
-# Collect recompiled sources
-file(GLOB PPC_RECOMP_SOURCES "${PPC_DIR}/ppc_recomp.*.cpp")
-list(APPEND PPC_RECOMP_SOURCES "${PPC_DIR}/ppc_func_mapping.cpp")
-
-add_executable(your_game_runtime
-    src/main.cpp src/memory.cpp src/dispatch.cpp src/kernel_stubs.cpp
-    ${PPC_RECOMP_SOURCES}
-)
-
-target_include_directories(your_game_runtime PRIVATE ${PPC_DIR} ${SIMDE_DIR})
-target_compile_options(your_game_runtime PRIVATE
-    -Wno-null-arithmetic -Wno-unused-value -Wno-tautological-undefined-compare
-)
-```
-
-### 8.7. Running It
+Launch through the helper:
 
 ```bash
-mkdir build && cd build
-cmake .. -DCMAKE_CXX_COMPILER=clang++
-cmake --build . --config Release -j8
-./your_game_runtime path/to/default_decompressed.bin
+scripts/run_thp8.py --profile original
 ```
 
-**Expected output for a minimal first run:**
-```
-=== THP8 Recomp Runtime ===
+Or run the executable directly:
 
-[1] Allocating guest memory: 2214592512 bytes (2.1 GB)...
-  Guest memory base: 0x300000000
-  Alignment check: base & 0x1F = 0x0 (OK)
-[2] Loading XEX image...
-  Loaded 11010048 bytes at base+0x82000000
-[3] Setting up dispatch table...
-  Functions registered: 39272
-[4] Initializing PPCContext...
-  r1 (stack pointer): 0x70100000
-[5] Resolving entry point: 0x823AC158
-[6] Attempting to execute entry point...
-STUB: NtReadFile called
-Entry point returned normally.
+```bash
+project/build/thp8 \
+  --game_data_root private/unpatched-game-full \
+  --gpu_plugin xenos \
+  --fullscreen=false
 ```
 
-The game enters its initialization, hits an `NtReadFile` call (likely loading a config or boot file), and returns because the stub returns success without providing data. From here, the work is incremental: implement kernel stubs one at a time, starting with the ones that get called first.
+Useful debugging rules:
 
-### 8.8. Porting Kernel Code from Other Recompilations
+- A missing `generated/sources.cmake` means codegen has not run.
+- A function-registration or invalid-call failure usually means analysis missed
+  a target or split a function incorrectly.
+- A failure after changing XEX revision usually means generated addresses and
+  native overrides no longer match.
+- A ReXGlue patch conflict means the submodule is at the wrong commit or is
+  partially modified.
+- Missing game files should be fixed through `--game_data_root` or the importer,
+  not by copying assets into the source tree.
+- Persistent graphics values live in `thp8.toml`; explicit command-line values
+  take precedence.
+- ReXGlue logs are the first place to inspect GPU, audio, VFS, and guest-module
+  startup failures.
 
-The [UnleashedRecomp](https://github.com/hedge-dev/UnleashedRecomp) project provides battle-tested implementations of many Xbox 360 kernel primitives. Since the kernel ABI is the same across all Xbox 360 titles, the following can be ported directly with minor adaptation:
+When diagnosing a new guest crash:
 
-- **Events** (`KeInitializeEvent`, `KeSetEvent`, `KeResetEvent`, `KeWaitForSingleObject`) — atomic flag + `std::condition_variable`
-- **Semaphores** (`KeInitializeSemaphore`, `KeReleaseSemaphore`) — counting semaphore with condition variable
-- **TLS** (`KeTlsAlloc`, `KeTlsSetValue`, `KeTlsGetValue`, `KeTlsFree`) — `thread_local` vector indexed by slot
-- **Spinlocks** (`KfAcquireSpinLock`, `KfReleaseSpinLock`) — `std::atomic_ref` CAS loop
-- **PCR** (Processor Control Region, `r13`) — per-thread struct at a fixed guest address (`0x7F000000`)
+1. Reproduce with the supported unpatched XEX.
+2. Record the guest address and surrounding generated function.
+3. Compare it with XEX disassembly.
+4. Fix analysis in the manifest or add a narrow native override.
+5. Regenerate if the manifest changed.
+6. Rebuild and retest the original path.
 
-Key adaptation: the UnleashedRecomp kernel uses C++ classes stored in a host-side map keyed by guest address. Pointer sizes differ (their target may be 32-bit vs 64-bit), so check struct layouts carefully.
+Avoid patching generated C++ directly; those changes disappear on the next
+codegen run and hide the real analyzer or integration issue.
 
-### 8.9. The `trapWord` / Worker Thread Problem
+## 13. Build the Windows Installer
 
-Xbox 360 `tw` (trap word) instructions like `twllei r9,0` and `twlgei r11,-1` are frequently used as lightweight **inter-thread signaling primitives** — they trigger a hardware trap that the OS intercepts to reschedule waiting threads. XenonRecomp emits these as **comments only** (no-ops).
+Install [Inno Setup 7](https://jrsoftware.org/isinfo.php), then run:
 
-This causes silent deadlocks: producer code pushes work to a ring buffer and issues a trapWord to wake a worker thread, but the worker never wakes because the trap is a no-op.
-
-**The symptom:** a spin-loop `while (io_obj[212] != 0)` never exits.
-
-**The fix pattern:** Override the work-submission function to call the inline work processor (`sub_823A25E8`-style) synchronously, bypassing the worker thread entirely. Use a `thread_local bool` recursion guard to prevent infinite loops when the completion callback re-enters the submission path:
-
-```cpp
-// Capture queue_manager pointer from work-submission callers.
-static thread_local uint32_t g_async_qm = 0;
-
-PPC_FUNC(sub_823A2890) {      // work submission function
-    PPC_FUNC_PROLOGUE();
-    g_async_qm = ctx.r3.u32;  // capture before original runs
-    __imp__sub_823A2890(ctx, base);
-}
-
-PPC_FUNC(sub_823A67B8) {      // ring-buffer push (trapWord site)
-    PPC_FUNC_PROLOGUE();
-    thread_local bool in_dispatch = false;
-    if (!in_dispatch) {
-        uint32_t slot_ptr = PPC_LOAD_U32(ctx.r4.u32);
-        in_dispatch = true;
-        ctx.r3.u32 = g_async_qm;
-        ctx.r4.u32 = slot_ptr;
-        ctx.r5.u32 = 0;
-        sub_823A25E8(ctx, base);  // inline: processes work + calls completion callback
-        in_dispatch = false;
-    }
-    // Recursive call (completion notification): skip; spin-wait already cleared.
-}
+```powershell
+scripts\build_windows_installer.ps1
 ```
 
-The completion callback (`sub_823A43C8`) clears `io_obj[212] = 0` during the synchronous `sub_823A25E8` call, so the spin-wait exits immediately when control returns to the caller.
+The script:
 
-### 8.10. Alternative: Using the ReXGlue SDK (Recommended)
+1. builds the configured project
+2. installs only the `ProjectRecomp` CMake component into a staging directory
+3. includes the ReXGlue runtime, Xenos GPU plugin, release VC runtime DLLs,
+   licenses, and documentation
+4. compiles the game-free installer
 
-Building a runtime from scratch (as described in sections 8.1–8.9) is instructive but extremely time-consuming. **[ReXGlue SDK](https://github.com/rexglue/rexglue-sdk)** is a complete Xbox 360 recompilation runtime that provides kernel, D3D12 GPU translation, audio, input, and more — out of the box.
+The setup wizard asks the user for an extracted disc directory, validates the
+exact base XEX, and imports the game data separately from the application.
+Uninstalling the runtime does not delete the user's imported game.
 
-> **THP8 now uses ReXGlue.** The historical custom runtime has been removed;
-> `project/` uses the ReXGlue SDK.
+## 14. Historical Migration
 
-#### Why ReXGlue vs. custom runtime
+ProjectRecomp began with standalone XenonRecomp output and a small custom
+runtime containing hundreds of kernel stubs. That prototype was useful for
+proving the XEX analysis and identifying game-specific behavior, but it did not
+provide a complete graphics, audio, threading, or platform layer.
 
-| Aspect | Historical custom prototype | ReXGlue SDK (`project/`) |
-|--------|-------------------|------------------------|
-| Kernel functions | 234 stubs, ~few implemented | SDK implements all common ones |
-| File I/O | Custom NtCreateFile/NtReadFile | Full VFS with game:\ path mapping |
-| Threading | std::thread wrapping | XThread, event, semaphore, TLS |
-| Graphics | No translation | D3D12 GPU command translation |
-| Audio | Stubs only | XMA decode + SDL3 playback |
-| XEX loading | Manual decompressed binary | SDK loads XEX and automatically applies a sibling XEXP |
-| Build | ~10 files, simple | `find_package(rexglue)`, 3 files |
+The migration to ReXGlue retained the useful analysis results:
 
-#### Setup
+- known function and internal-entry boundaries
+- corrected function extents
+- title-specific native overrides
+- menu and rendering discoveries
 
-1. **Initialize the ReXGlue v0.10.0 submodule**:
-   ```bash
-   git submodule update --init --recursive tools/rexglue-sdk
-   ```
+It replaced:
 
-2. **Run codegen** to regenerate PPC→C++ using ReXGlue's PPCContext (incompatible with XenonRecomp's context due to extra `kernel_state*` field at offset 0):
-   ```bash
-   tools/rexglue-sdk/out/install/linux-amd64/bin/rexglue codegen config/THP8_rexglue.toml
-   ```
-   This produces `generated/` with 237 recomp files plus the project headers, registration sources, and `sources.cmake`.
+- checked-in `ppc/` output with ReXGlue codegen
+- the custom `runtime/` with `rex::ReXApp`
+- standalone shader experiments with the Xenos runtime plugin
+- one-off analysis submodules and scripts with the manifest's explicit function
+  table
 
-   ReXGlue automatically looks for `default.xexp` beside `default.xex` during
-   codegen. THP8's current configuration targets the unpatched retail XEX, so
-   that file must be absent or renamed before running this command.
+For new work, treat `config/THP8_rexglue.toml`, `project/`, the ReXGlue patch
+stack, and this document as the authoritative workflow.
 
-3. **Build**:
-   ```powershell
-   cmake -S project -B project/build -G Ninja \
-     -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
-     -DCMAKE_BUILD_TYPE=RelWithDebInfo
-   cmake --build project/build -j8
-   ```
+## References
 
-4. **Extract game data** from the disc image using [extract-xiso](https://github.com/XboxDev/extract-xiso):
-   ```powershell
-   tools/extract-xiso/artifacts/extract-xiso.exe "private/Tony Hawk's Project 8.iso"
-   # Creates: "Tony Hawk's Project 8/DATA/..."
-   ```
-
-   The extracted game directory must also omit or rename `default.xexp`.
-   ReXGlue applies a sibling patch automatically at runtime, which would not
-   match this project's unpatched generated code.
-
-5. **Run**:
-   ```powershell
-   SDL_VIDEODRIVER=x11 project/build/thp8 \
-     --game_data_root="path/to/game/directory" \
-     --gpu_plugin=xenos --fullscreen=false
-   ```
-
-#### Project structure with ReXGlue
-
-```
-project/
-├── CMakeLists.txt      # ReXGlue submodule + generated sources
-└── src/
-    ├── thp8_app.h      # THP8App : rex::ReXApp — just override hooks
-    ├── main.cpp        # REX_DEFINE_APP(thp8, THP8App::Create)
-    └── stubs.cpp       # Legacy patched-build overrides (not compiled)
-
-generated/              # Output of rexglue codegen (gitignored)
-    thp8_pch.h          # Image config, PPC ABI, and memory helpers
-    thp8_init.h/cpp     # Image info and module registration
-    thp8_register.cpp   # Recompiled function registration
-    thp8_recomp.N.cpp   # 237 recomp files
-
-config/
-    THP8_rexglue.toml # Project manifest and codegen config
-```
-
-#### Legacy patched-build overrides (stubs.cpp)
-
-The historical overrides in `stubs.cpp` target patched executable addresses and
-are intentionally excluded from the current unpatched build. Do not enable them
-without revalidating every address against the selected XEX.
-
-```cpp
-// Heap sentinel repair (see stubs.cpp for details)
-extern "C" REX_FUNC(sub_823AE680) { ... }
-
-// Async I/O deadlock fix (trapWord-based signaling)
-extern "C" REX_FUNC(sub_823A67B8) { ... }
-
-// Disc path check suppressor (Xbox 360 disc error UI)
-extern "C" REX_FUNC(sub_823A13A8) { ctx.r3.u64 = 0; }
-```
-
-### 8.11. Next Steps for the Runtime
-
-The following list applied to the removed custom-runtime prototype. ReXGlue
-provides these runtime services for the active project.
-
-1. **File I/O** — Implement `NtCreateFile`/`NtReadFile`/`NtWriteFile` to load game data from the extracted disc
-2. **Memory management** — Implement `NtAllocateVirtualMemory` and `MmAllocatePhysicalMemoryEx` to give the game real heap memory
-3. **Threading** — Implement `ExCreateThread` to allow the game to spawn threads
-4. **Critical sections** — Implement `RtlInitializeCriticalSection`/`Enter`/`Leave` using `std::mutex`
-5. **Graphics** — Either stub `Vd*` functions or begin implementing a D3D12/Vulkan translation layer
-6. **Audio** — Stub `XMA*` and `XAudio*` functions, or implement XMA decoding with FFmpeg
-
----
-
-## 9. Troubleshooting & Game-Specific Issues
-
-### "All register patterns show NOT FOUND"
-The XEX is compressed/encrypted. Use the `xex_dump` helper tool (which uses XenonUtils internally) instead of searching the raw file.
-
-### XenonAnalyse exits silently
-Check that the XEX file path is correct and the file is a valid XEX2 binary (magic bytes `XEX2` at offset 0).
-
-### XenonAnalyse misses jump tables
-The detection logic was written for Sonic Unleashed's compiler output. Different Xbox 360 compiler versions produce different jump table patterns. Look for `mtctr r0` followed by `bctr` in the disassembly — that's the typical jump table pattern. You can add tables manually to the TOML.
-
-### XenosRecomp finds zero shaders
-The game uses a custom shader container format. You'll need to:
-1. Find where shader data lives (search for "Xbox 360 Shader Compiler" or "vs_3_0"/"ps_3_0" strings)
-2. Reverse-engineer the container format
-3. Either extract shaders into the standard format or modify XenosRecomp
-
-### Recompiled code has many unrecognized instructions
-The recompiler doesn't support every PPC instruction. Common missing ones include less-used VMX (vector) instructions and some bit-manipulation instructions. These would need to be implemented in XenonRecomp's instruction translator. For each unrecognized instruction, a `__debugbreak()` is inserted — you'll discover at runtime which ones are actually hit.
-
-### Game hangs in a spin-loop (trapWord deadlock)
-See [Section 8.9](#89-the-trapword--worker-thread-problem). The game uses `twllei`/`twlgei` trap-word instructions to signal worker threads. These are no-ops in the recompilation. Find the ring-buffer push function containing these instructions (it's the callee of the work-submission function, before the spin-wait loop), and override it to call the inline work processor synchronously.
-
-### Dispatch table collides with game globals/BSS
-On some titles (including THP8), the game's BSS/global variables at runtime overlap with the dispatch table if it's placed immediately after the XEX image in guest memory. A custom runtime must keep the dispatch table in **host** (not guest) memory and update `PPC_CALL_INDIRECT_FUNC` to use the host-side table pointer directly.
-
----
-
-## 10. Resources
-
-### Xbox 360 Architecture
-- [Free60 Wiki](https://free60.org/) — community-documented Xbox 360 hardware info
-- [Xenia GPU Documentation](https://github.com/xenia-project/xenia/blob/master/docs/gpu.md) — Xenos GPU details
-- [IBM PowerPC ISA](https://www.ibm.com/docs/en/aix/7.2?topic=programming-powerpc-architecture) — instruction set reference
-
-### Recompilation Projects
-- [Unleashed Recompiled](https://github.com/hedge-dev/UnleashedRecomp) — the reference Xbox 360 recompilation (Sonic Unleashed)
-- [N64: Recompiled](https://github.com/N64Recomp/N64Recomp) — the project that inspired XenonRecomp (simpler architecture, good for understanding the concept)
-- [Zelda 64: Recompiled](https://github.com/rt64/zelern64) — another successful N64 recompilation
-
-### Emulators (for reference implementations)
-- [Xenia](https://github.com/xenia-project/xenia) — Xbox 360 emulator with extensive kernel, CPU, and GPU implementations
-- [Xenia Canary](https://github.com/xenia-canary/xenia-canary) — active fork with additional game compatibility
-
-### Tools
-- [ReXGlue SDK](https://github.com/rexglue/rexglue-sdk) — **recommended runtime** for new projects; provides kernel, GPU, audio, input
-- [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) — PPC → C++ recompiler
-- [XenosRecomp](https://github.com/hedge-dev/XenosRecomp) — Xenos shader → HLSL recompiler
-- [extract-xiso](https://github.com/XboxDev/extract-xiso) — Xbox/Xbox 360 disc image extractor
-- [xdvdfs](https://crates.io/crates/xdvdfs-cli) — Rust-based XDVDFS extractor
-
----
-
-*This guide was written while working on a recompilation of Tony Hawk's Project 8 (Xbox 360). The project started with a custom runtime (XenonRecomp + hand-rolled kernel stubs) and later migrated to the [ReXGlue SDK](https://github.com/rexglue/rexglue-sdk) for a complete runtime.*
+- [ReXGlue SDK](https://github.com/rexglue/rexglue-sdk)
+- [Xenia](https://github.com/xenia-project/xenia) for Xbox 360 behavioral
+  references
+- [Free60](https://free60.org/) for community hardware documentation
+- [extract-xiso](https://github.com/XboxDev/extract-xiso)
+- [xdvdfs](https://crates.io/crates/xdvdfs-cli)

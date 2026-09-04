@@ -22,5 +22,4 @@ For a normal installation, validate and copy an extracted disc with
 
 | File | How to generate |
 |------|-----------------|
-| `default_decompressed.bin` | `./tools/xex_dump/build/xex_dump private/default.xex private/default_decompressed.bin` |
 | `disc_extract/` | `extract-xiso -d private/disc_extract "private/Your Game.iso"` |
