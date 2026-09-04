@@ -503,7 +503,7 @@ The script:
 4. compiles the game-free installer
 5. clones the selected commit and every recursive submodule into a clean
    staging tree
-6. creates complete corresponding-source ZIP and tar.gz archives
+6. creates a complete corresponding-source ZIP archive
 7. writes SHA-256 checksums for all release artifacts
 
 The setup wizard asks the user for an extracted disc directory, validates the

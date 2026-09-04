@@ -19,12 +19,11 @@ exact recursive ReXGlue submodules, configuration files, ProjectRecomp patches,
 and build instructions, is distributed beside the installer as:
 
 - `ProjectRecomp-<version>-Source.zip`
-- `ProjectRecomp-<version>-Source.tar.gz`
 
 Checksums are provided in
 `ProjectRecomp-<version>-Source-SHA256SUMS.txt`. See
-`docs/recompilation-guide.md` in either archive for rebuilding and relinking
-instructions. The archives contain no game executable or game assets.
+`docs/recompilation-guide.md` in the archive for rebuilding and relinking
+instructions. The archive contains no game executable or game assets.
 
 ## Runtime Components
 

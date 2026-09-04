@@ -55,14 +55,11 @@ $Installer = Join-Path $OutputDirectory (
 $SourceZip = Join-Path $OutputDirectory (
     "ProjectRecomp-$Version-Source.zip"
 )
-$SourceTar = Join-Path $OutputDirectory (
-    "ProjectRecomp-$Version-Source.tar.gz"
-)
 $ReleaseChecksums = Join-Path $OutputDirectory (
     "ProjectRecomp-$Version-SHA256SUMS.txt"
 )
 
-$Checksums = foreach ($Path in @($Installer, $SourceZip, $SourceTar)) {
+$Checksums = foreach ($Path in @($Installer, $SourceZip)) {
     if (!(Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw "Expected release artifact not found: $Path"
     }
@@ -72,4 +69,4 @@ $Checksums = foreach ($Path in @($Installer, $SourceZip, $SourceTar)) {
 Set-Content -LiteralPath $ReleaseChecksums -Value $Checksums -Encoding ASCII
 
 Write-Output "Release artifacts for commit ${ReleaseCommit}:"
-Get-Item -LiteralPath $Installer, $SourceZip, $SourceTar, $ReleaseChecksums
+Get-Item -LiteralPath $Installer, $SourceZip, $ReleaseChecksums

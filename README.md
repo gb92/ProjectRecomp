@@ -66,10 +66,10 @@ preserved when the runtime is uninstalled.
 The installer is not currently code-signed, so Windows may display a
 SmartScreen warning for the initial alpha.
 
-Each release also includes complete ZIP and tar.gz source archives with every
-recursive submodule required to rebuild the runtime. These corresponding-source
-archives are provided for reproducibility and LGPL compliance; GitHub's
-automatically generated source archives do not include submodule contents.
+Each release also includes a complete source ZIP with every recursive submodule
+required to rebuild the runtime. This corresponding-source archive is provided
+for reproducibility and LGPL compliance; GitHub's automatically generated
+source archives do not include submodule contents.
 
 ## Build from Source
 

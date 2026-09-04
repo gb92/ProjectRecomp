@@ -19,21 +19,7 @@ $TemporaryRoot = Join-Path (
 $CheckoutDirectory = Join-Path $TemporaryRoot "r"
 $StageDirectory = Join-Path $TemporaryRoot $ArchiveName
 $ZipPath = Join-Path $OutputDirectory "$ArchiveName.zip"
-$TarPath = Join-Path $OutputDirectory "$ArchiveName.tar.gz"
 $ChecksumPath = Join-Path $OutputDirectory "$ArchiveName-SHA256SUMS.txt"
-
-function Get-TarCommand {
-    $TarCommand = (Get-Command tar -ErrorAction Stop).Source
-    if ($env:OS -eq "Windows_NT") {
-        $GitCommand = (Get-Command git -ErrorAction Stop).Source
-        $GitRoot = Split-Path -Parent (Split-Path -Parent $GitCommand)
-        $GitTarCommand = Join-Path $GitRoot "usr\bin\tar.exe"
-        if (Test-Path -LiteralPath $GitTarCommand) {
-            return $GitTarCommand
-        }
-    }
-    return $TarCommand
-}
 
 function Invoke-Git {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
@@ -75,7 +61,7 @@ try {
     }
 
     New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-    foreach ($Path in @($ZipPath, $TarPath, $ChecksumPath)) {
+    foreach ($Path in @($ZipPath, $ChecksumPath)) {
         if (Test-Path -LiteralPath $Path) {
             Remove-Item -LiteralPath $Path -Force
         }
@@ -85,27 +71,13 @@ try {
     Compress-Archive -LiteralPath $StageDirectory `
         -DestinationPath $ZipPath -CompressionLevel Optimal
 
-    $TarCommand = Get-TarCommand
-    if ($env:OS -eq "Windows_NT") {
-        Move-Item -LiteralPath $StageDirectory -Destination $CheckoutDirectory
-        & $TarCommand -czf $TarPath -C $TemporaryRoot `
-            "--transform=s,^r,$ArchiveName," "r"
-    } else {
-        & $TarCommand -czf $TarPath -C $TemporaryRoot $ArchiveName
-    }
-    if ($LASTEXITCODE) {
-        throw "Creating the tar.gz archive failed with exit code $LASTEXITCODE."
-    }
-
-    $Checksums = foreach ($Path in @($ZipPath, $TarPath)) {
-        $Hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
-        "$($Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($Path))"
-    }
-    Set-Content -LiteralPath $ChecksumPath -Value $Checksums -Encoding ASCII
+    $Hash = (Get-FileHash -LiteralPath $ZipPath -Algorithm SHA256).Hash
+    Set-Content -LiteralPath $ChecksumPath `
+        -Value "$($Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($ZipPath))" `
+        -Encoding ASCII
 
     Write-Output "Archived commit $Commit with recursive submodules."
     Write-Output $ZipPath
-    Write-Output $TarPath
     Write-Output $ChecksumPath
 } finally {
     if (Test-Path -LiteralPath $TemporaryRoot) {
