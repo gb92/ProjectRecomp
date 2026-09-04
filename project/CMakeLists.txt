@@ -206,13 +206,113 @@ if(WIN32)
     install(FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/../README.md"
         "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../THIRD-PARTY-NOTICES.md"
         DESTINATION .
         COMPONENT ProjectRecomp
     )
-    install(FILES
+
+    function(thp8_install_license SOURCE_FILE OUTPUT_NAME)
+        if(NOT EXISTS "${SOURCE_FILE}")
+            message(FATAL_ERROR "License file not found: ${SOURCE_FILE}")
+        endif()
+        install(FILES "${SOURCE_FILE}"
+            DESTINATION licenses
+            RENAME "${OUTPUT_NAME}"
+            COMPONENT ProjectRecomp
+        )
+    endfunction()
+
+    thp8_install_license(
         "${REXGLUE_SOURCE_DIR}/LICENSE"
-        DESTINATION .
-        RENAME REXGLUE-LICENSE.txt
-        COMPONENT ProjectRecomp
-    )
+        "ReXGlue-BSD-3-Clause.txt")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/sdl3/LICENSE.txt"
+        "SDL3-zlib.txt")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/sdl3/src/hidapi/LICENSE-bsd.txt"
+        "SDL-HIDAPI-BSD-3-Clause.txt")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/sdl3/src/video/yuv2rgb/LICENSE"
+        "SDL-yuv2rgb-BSD-3-Clause.txt")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/imgui/LICENSE.txt"
+        "Dear-ImGui-MIT.txt")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/imgui/docs/README.md"
+        "Dear-ImGui-Embedded-Components.md")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/fmt/LICENSE"
+        "fmt-MIT.txt")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/spdlog/LICENSE"
+        "spdlog-MIT.txt")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/tomlplusplus/LICENSE"
+        "tomlplusplus-MIT.txt")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/simde/COPYING"
+        "SIMDe-MIT.txt")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/utfcpp/LICENSE"
+        "utf8cpp-Boost-1.0.txt")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/cli11/LICENSE"
+        "CLI11-BSD-3-Clause.txt")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/xxHash/LICENSE"
+        "xxHash-BSD-2-Clause.txt")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/aes_128/LICENSE"
+        "AES-128-MIT.txt")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/crypto/des/LICENSE"
+        "DES-MIT.txt")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/crypto/TinySHA1.hpp"
+        "TinySHA1-NOTICE.hpp")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/o1heap/LICENSE"
+        "o1heap-MIT.txt")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/stb/stb_image.h"
+        "stb_image-NOTICE.h")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/renderdoc/renderdoc_app.h"
+        "RenderDoc-MIT.h")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/FFmpeg/LICENSE.md"
+        "FFmpeg-LICENSE.md")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/FFmpeg/COPYING.LGPLv2.1"
+        "FFmpeg-LGPL-2.1.txt")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/libmspack/libmspack/COPYING.LIB"
+        "libmspack-LGPL-2.1.txt")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/tracy/LICENSE"
+        "Tracy-BSD-3-Clause.txt")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/tracy/public/common/tracy_lz4.cpp"
+        "Tracy-LZ4-BSD-2-Clause.cpp")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/tracy/public/client/tracy_concurrentqueue.h"
+        "Tracy-concurrentqueue-BSD-2-Clause.h")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/tracy/public/client/tracy_SPSCQueue.h"
+        "Tracy-SPSCQueue-MIT.h")
+    thp8_install_license(
+        "${REXGLUE_SOURCE_DIR}/thirdparty/tracy/public/client/tracy_rpmalloc.cpp"
+        "Tracy-rpmalloc-NOTICE.cpp")
+    thp8_install_license(
+        "${CMAKE_CURRENT_SOURCE_DIR}/../licenses/disruptorplus-MIT.txt"
+        "disruptorplus-MIT.txt")
+    thp8_install_license(
+        "${CMAKE_CURRENT_SOURCE_DIR}/../licenses/DirectXShaderCompiler-NCSA.txt"
+        "DirectXShaderCompiler-NCSA.txt")
+    thp8_install_license(
+        "${CMAKE_CURRENT_SOURCE_DIR}/../licenses/SHA256-zlib.txt"
+        "SHA256-zlib.txt")
+    thp8_install_license(
+        "${CMAKE_CURRENT_SOURCE_DIR}/../licenses/AMD-ShaderUtils-MIT-and-RSA-MD5.txt"
+        "AMD-ShaderUtils-MIT-and-RSA-MD5.txt")
 endif()

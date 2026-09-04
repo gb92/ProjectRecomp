@@ -486,12 +486,12 @@ When diagnosing a new guest crash:
 Avoid patching generated C++ directly; those changes disappear on the next
 codegen run and hide the real analyzer or integration issue.
 
-## 13. Build the Windows Installer
+## 13. Build a Windows Release
 
 Install [Inno Setup 7](https://jrsoftware.org/isinfo.php), then run:
 
 ```powershell
-scripts\build_windows_installer.ps1
+scripts\build_release.ps1
 ```
 
 The script:
@@ -499,12 +499,19 @@ The script:
 1. builds the configured project
 2. installs only the `ProjectRecomp` CMake component into a staging directory
 3. includes the ReXGlue runtime, Xenos GPU plugin, release VC runtime DLLs,
-   licenses, and documentation
+   third-party licenses, and documentation
 4. compiles the game-free installer
+5. clones the selected commit and every recursive submodule into a clean
+   staging tree
+6. creates complete corresponding-source ZIP and tar.gz archives
+7. writes SHA-256 checksums for all release artifacts
 
 The setup wizard asks the user for an extracted disc directory, validates the
 exact base XEX, and imports the game data separately from the application.
 Uninstalling the runtime does not delete the user's imported game.
+
+The source archives are required release assets. GitHub's automatically
+generated source archives omit submodule contents and are not a substitute.
 
 ## 14. Historical Migration
 

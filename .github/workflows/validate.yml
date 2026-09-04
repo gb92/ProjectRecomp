@@ -1,0 +1,93 @@
+name: Validate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repository:
+    name: Repository checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Test game importer
+        run: python -m unittest discover -s tests -v
+
+      - name: Check Python and shell syntax
+        shell: bash
+        run: |
+          python -m compileall -q scripts tests
+          bash -n scripts/apply-rexglue-patches.sh
+
+      - name: Check repository hygiene
+        shell: bash
+        run: |
+          git diff --check
+          test "$(git ls-files private)" = "private/README.md"
+          test -z "$(git ls-files 'generated/**')"
+          test "$(git rev-parse HEAD:tools/rexglue-sdk)" = \
+            "4c1350847bb2bbc5fbf4272c78731632fccce8ab"
+
+  rexglue-patches:
+    name: ReXGlue patch stack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Apply patch stack
+        run: scripts/apply-rexglue-patches.sh tools/rexglue-sdk
+
+      - name: Verify clean patches and idempotency
+        shell: bash
+        run: |
+          git -C tools/rexglue-sdk diff --check
+          scripts/apply-rexglue-patches.sh tools/rexglue-sdk
+
+  windows-scripts:
+    name: Windows scripts
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Test game importer
+        run: python -m unittest discover -s tests -v
+
+      - name: Parse PowerShell scripts
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem scripts -Filter *.ps1 | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName,
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count) {
+              $failed = $true
+              $errors | ForEach-Object {
+                Write-Error "$($_.Extent.File): $($_.Message)"
+              }
+            }
+          }
+          if ($failed) {
+            exit 1
+          }

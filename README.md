@@ -5,6 +5,11 @@ Tony Hawk's Project 8 for PC using the [ReXGlue SDK](https://github.com/rexglue/
 Title updates are intentionally unsupported so one executable layout remains
 the source of truth for generated code and runtime fixes.
 
+> [!WARNING]
+> ProjectRecomp is pre-release alpha software. Expect compatibility problems,
+> incomplete features, and changes to configuration or save behavior. Keep
+> backups of important saves and settings.
+
 > [!IMPORTANT]
 > **This repository and its releases do not contain Tony Hawk's Project 8 or
 > any required game assets.** You must supply files from your own legally
@@ -19,13 +24,13 @@ the source of truth for generated code and runtime fixes.
 | Linux toolchain | In progress | x86-64, Clang 18+, Ninja, Vulkan |
 | ReXGlue integration | Done | v0.10.0 submodule |
 | Base-XEX code generation | Done | Recovered function ranges and jump tables generate cleanly |
-| Runtime | In progress | Boots, enters Career, and reaches gameplay |
+| Runtime | In progress | Boots, enters Career, and reaches gameplay on Windows and Linux |
 | Frame pacing | In progress | 60 FPS mode works; intermittent CPU-side Vulkan replay bursts remain |
 
 ### Current Milestone
 
 The base version (`0.0.0.1`) boots through ReXGlue, enters Career mode, and
-reaches gameplay on Linux.
+reaches gameplay on Windows and Linux.
 
 ### Known Issues
 
@@ -45,48 +50,65 @@ x86-64 builds target the `x86-64-v2` instruction set. Graphics support depends
 on a current driver capable of running ReXGlue's Direct3D 12 or Vulkan backend.
 These requirements may change as broader compatibility testing is completed.
 
-## Quick Start
+## Install on Windows
+
+1. Download `ProjectRecomp-0.1.0-alpha.1-Windows-x64-Setup.exe` from the
+   [Releases](https://github.com/gb92/ProjectRecomp/releases) page.
+2. Extract your legally acquired Xbox 360 disc to a folder.
+3. Run Setup and select that extracted folder when prompted.
+4. Launch ProjectRecomp from the Start menu or optional desktop shortcut.
+
+Setup validates the supported `default.xex` before copying game data. The
+runtime is installed under `Program Files\ProjectRecomp`; imported game data is
+stored separately under `%USERPROFILE%\Games\ProjectRecomp` by default and is
+preserved when the runtime is uninstalled.
+
+The installer is not currently code-signed, so Windows may display a
+SmartScreen warning for the initial alpha.
+
+Each release also includes complete ZIP and tar.gz source archives with every
+recursive submodule required to rebuild the runtime. These corresponding-source
+archives are provided for reproducibility and LGPL compliance; GitHub's
+automatically generated source archives do not include submodule contents.
+
+## Build from Source
 
 ### Prerequisites
 
-- **Python ≥ 3.8**
-- For development: **CMake ≥ 3.25**, **Clang ≥ 18**, **Ninja**, **Git**
+- **Python 3.8 or newer**
+- **CMake 3.25 or newer**, **Clang 18 or newer**, **Ninja**, and **Git**
 - Your own original Xbox 360 copy of Tony Hawk's Project 8
 
 Only the unmodified base executable revision `0.0.0.1` is supported. Title
 updates, modified executables, and files from other platforms are not
 compatible.
 
-### Import Your Game
+### Prepare Your Game
 
-Extract your legally acquired Xbox 360 disc to a directory, then run:
+Extract your disc to `private/unpatched-game-full`, then validate it:
 
 ```bash
-python scripts/import_game.py "path/to/extracted/disc"
+python scripts/import_game.py private/unpatched-game-full --dry-run
 ```
 
 The importer validates `default.xex` against the supported base revision before
-copying any files. It rejects title updates and installs the extracted game
-atomically under `%USERPROFILE%\Games\ProjectRecomp` on Windows or
-`${XDG_DATA_HOME:-~/.local/share}/projectrecomp/game` on Linux. Existing imports
-are never replaced unless `--force` is supplied, and even then the tool refuses
-to replace directories it did not create. Use `--dry-run` to validate without
-copying or `--destination` for a portable/custom location.
+copying any files and rejects title updates. For a normal per-user import, pass
+the extracted directory without `--dry-run`; use `--destination` to select a
+different library and `--force` only to replace an import previously created by
+this tool.
 
-Developers may instead keep the base `default.xex` at `private/default.xex` and
-the extracted disc at `private/unpatched-game-full`.
+### Generate and Build
 
-Windows release installers include this import step directly in the setup
-wizard and do not require Python. The installer validates the selected disc
-folder before installing the game-free runtime to `Program Files\ProjectRecomp`.
-It stores game data separately, defaulting to
-`%USERPROFILE%\Games\ProjectRecomp`, and lets the user choose another drive.
+Follow [docs/recompilation-guide.md](docs/recompilation-guide.md) for the
+complete ReXGlue workflow, including SDK setup, code generation, the project
+patch stack, Windows and Linux builds, and debugging.
 
-To build the Windows installer after configuring the project, install
-[Inno Setup 7](https://jrsoftware.org/isinfo.php) and run:
+To build all Windows release artifacts after configuring the project, install
+[Inno Setup 7](https://jrsoftware.org/isinfo.php), commit the release tree, and
+run:
 
 ```powershell
-scripts\build_windows_installer.ps1
+scripts\build_release.ps1
 ```
 
 ### Build on Linux
@@ -109,8 +131,6 @@ cmake -S project -B project/build -G Ninja \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build project/build -j8
 ```
-
-Use the `linux-arm64` preset and install path on ARM64.
 
 ### Graphics Profiles and Resolutions
 
@@ -219,11 +239,12 @@ thp8-recomp/
 
 ## References
 
-- [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) — PPC → C++ recompiler
-- [XenosRecomp](https://github.com/hedge-dev/XenosRecomp) — Xenos shader → HLSL recompiler
+- [ReXGlue SDK](https://github.com/rexglue/rexglue-sdk) — Runtime and code generation
+- [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) — Original PPC-to-C++ recompilation tooling
+- [XenosRecomp](https://github.com/hedge-dev/XenosRecomp) — Original Xenos shader recompilation tooling
 - [Unleashed Recompiled](https://github.com/hedge-dev/UnleashedRecomp) — Reference project (Sonic Unleashed)
 - [Xenia](https://github.com/xenia-project/xenia) — Xbox 360 emulator (kernel/GPU reference)
-- [docs/recompilation-guide.md](docs/recompilation-guide.md) — Detailed guide applicable to any Xbox 360 game
+- [docs/recompilation-guide.md](docs/recompilation-guide.md) — ProjectRecomp's ReXGlue workflow
 
 ## Contributing and Support
 
@@ -241,3 +262,6 @@ ProjectRecomp's original code is available under the
 [BSD 3-Clause License](LICENSE). This license applies only to material owned by
 ProjectRecomp contributors. It does not grant rights to Tony Hawk's Project 8,
 its assets, trademarks, or other third-party material.
+
+See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for bundled dependencies,
+license texts, attribution, and corresponding-source information.
