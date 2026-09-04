@@ -8,10 +8,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$BuildDirectory = [IO.Path]::GetFullPath((Join-Path $RepoRoot $BuildDirectory))
-$OutputDirectory = [IO.Path]::GetFullPath(
-    (Join-Path $RepoRoot $OutputDirectory)
-)
+if (![IO.Path]::IsPathFullyQualified($BuildDirectory)) {
+    $BuildDirectory = Join-Path $RepoRoot $BuildDirectory
+}
+if (![IO.Path]::IsPathFullyQualified($OutputDirectory)) {
+    $OutputDirectory = Join-Path $RepoRoot $OutputDirectory
+}
+$BuildDirectory = [IO.Path]::GetFullPath($BuildDirectory)
+$OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $StageDirectory = Join-Path $BuildDirectory "package\windows-root"
 $InstallerScript = Join-Path $RepoRoot "packaging\windows\ProjectRecomp.iss"
 

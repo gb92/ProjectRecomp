@@ -8,9 +8,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$OutputDirectory = [IO.Path]::GetFullPath(
-    (Join-Path $RepoRoot $OutputDirectory)
-)
+if (![IO.Path]::IsPathFullyQualified($OutputDirectory)) {
+    $OutputDirectory = Join-Path $RepoRoot $OutputDirectory
+}
+$OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $ArchiveName = "ProjectRecomp-$Version-Source"
 $TemporaryRoot = Join-Path (
     [IO.Path]::GetTempPath()
