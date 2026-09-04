@@ -15,7 +15,8 @@ $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $ArchiveName = "ProjectRecomp-$Version-Source"
 $TemporaryRoot = Join-Path (
     [IO.Path]::GetTempPath()
-) "projectrecomp-source-$([Guid]::NewGuid().ToString('N'))"
+) "prsrc-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
+$CheckoutDirectory = Join-Path $TemporaryRoot "r"
 $StageDirectory = Join-Path $TemporaryRoot $ArchiveName
 $ZipPath = Join-Path $OutputDirectory "$ArchiveName.zip"
 $TarPath = Join-Path $OutputDirectory "$ArchiveName.tar.gz"
@@ -38,16 +39,17 @@ try {
 
     New-Item -ItemType Directory -Path $TemporaryRoot | Out-Null
     Invoke-Git clone --quiet --no-checkout --no-hardlinks `
-        $RepoRoot $StageDirectory
-    Invoke-Git -C $StageDirectory checkout --quiet --detach $Commit
-    Invoke-Git -C $StageDirectory submodule update --init --recursive
+        $RepoRoot $CheckoutDirectory
+    Invoke-Git -C $CheckoutDirectory checkout --quiet --detach $Commit
+    Invoke-Git -C $CheckoutDirectory submodule update --init --recursive
 
-    $RootGitDirectory = Join-Path $StageDirectory ".git"
+    $RootGitDirectory = Join-Path $CheckoutDirectory ".git"
     Remove-Item -LiteralPath $RootGitDirectory -Recurse -Force
-    Get-ChildItem -LiteralPath $StageDirectory -Filter ".git" `
+    Get-ChildItem -LiteralPath $CheckoutDirectory -Filter ".git" `
         -File -Force -Recurse | ForEach-Object {
             Remove-Item -LiteralPath $_.FullName -Force
         }
+    Move-Item -LiteralPath $CheckoutDirectory -Destination $StageDirectory
 
     $ForbiddenFiles = Get-ChildItem -LiteralPath $StageDirectory `
         -File -Force -Recurse | Where-Object {
