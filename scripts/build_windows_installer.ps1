@@ -8,10 +8,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-if (![IO.Path]::IsPathFullyQualified($BuildDirectory)) {
+if (![IO.Path]::IsPathRooted($BuildDirectory)) {
     $BuildDirectory = Join-Path $RepoRoot $BuildDirectory
 }
-if (![IO.Path]::IsPathFullyQualified($OutputDirectory)) {
+if (![IO.Path]::IsPathRooted($OutputDirectory)) {
     $OutputDirectory = Join-Path $RepoRoot $OutputDirectory
 }
 $BuildDirectory = [IO.Path]::GetFullPath($BuildDirectory)
