@@ -1,0 +1,29 @@
+diff --git a/src/codegen/phase_register.cpp b/src/codegen/phase_register.cpp
+index 7d1fa44..9707ef2 100644
+--- a/src/codegen/phase_register.cpp
++++ b/src/codegen/phase_register.cpp
+@@ -549,6 +549,12 @@ VoidResult registerEntryPoints(CodegenContext& ctx) {
+   size_t configFuncs = 0, configChunks = 0;
+   for (const auto& [address, cfg] : config.functions) {
+     uint32_t size = cfg.getSize(address);
++    if (cfg.isChunk()) {
++      graph.registerChunk(address, size);
++      configChunks++;
++      continue;
++    }
++
+     std::string name = cfg.name.empty() ? fmt::format("sub_{:08X}", address) : cfg.name;
+     auto* node = graph.addFunction(address, size, FunctionAuthority::CONFIG, true);
+     graph.setFunctionName(address, name);
+@@ -556,11 +562,6 @@ VoidResult registerEntryPoints(CodegenContext& ctx) {
+       node->setSharesRegisters(true);
+     }
+     configFuncs++;
+-
+-    if (cfg.isChunk()) {
+-      graph.registerChunk(address, size);
+-      configChunks++;
+-    }
+   }
+   if (configFuncs > 0) {
+     REXCODEGEN_DEBUG("Analyze: {} CONFIG functions, {} chunks", configFuncs, configChunks);

@@ -1,0 +1,12 @@
+diff --git a/include/rex/ui/imgui_drawer.h b/include/rex/ui/imgui_drawer.h
+index 366070c..6c26d74 100644
+--- a/include/rex/ui/imgui_drawer.h
++++ b/include/rex/ui/imgui_drawer.h
+@@ -40,6 +40,7 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
+   ~ImGuiDrawer();
+ 
+   ImGuiIO& GetIO();
++  ImGuiContext* GetContext() const { return internal_state_; }
+ 
+   // Per-overlay styling, patched by the consumer in OnConfigureStyle.
+   Style& style() { return style_; }

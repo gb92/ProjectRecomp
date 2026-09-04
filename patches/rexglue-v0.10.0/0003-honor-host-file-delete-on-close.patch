@@ -1,0 +1,76 @@
+diff --git a/include/rex/filesystem/devices/host_path_entry.h b/include/rex/filesystem/devices/host_path_entry.h
+index e061b06..516a4af 100644
+--- a/include/rex/filesystem/devices/host_path_entry.h
++++ b/include/rex/filesystem/devices/host_path_entry.h
+@@ -34,6 +34,8 @@ class HostPathEntry : public Entry {
+ 
+   X_STATUS Open(uint32_t desired_access, File** out_file) override;
+   bool Truncate() override;
++  void RetainFileHandle();
++  bool ReleaseFileHandle();
+ 
+   bool can_map() const override { return true; }
+   std::unique_ptr<memory::MappedMemory> OpenMapped(memory::MappedMemory::Mode mode, size_t offset,
+@@ -53,6 +55,7 @@ class HostPathEntry : public Entry {
+   X_STATUS RenameEntryInternal(const std::vector<std::string_view>& path_parts) override;
+ 
+   std::filesystem::path host_path_;
++  size_t open_file_count_ = 0;
+ };
+ 
+ }  // namespace rex::filesystem
+diff --git a/src/filesystem/devices/host_path_entry.cpp b/src/filesystem/devices/host_path_entry.cpp
+index d0dce00..07580fe 100644
+--- a/src/filesystem/devices/host_path_entry.cpp
++++ b/src/filesystem/devices/host_path_entry.cpp
+@@ -66,6 +66,19 @@ X_STATUS HostPathEntry::Open(uint32_t desired_access, File** out_file) {
+   return X_STATUS_SUCCESS;
+ }
+ 
++void HostPathEntry::RetainFileHandle() { ++open_file_count_; }
++
++bool HostPathEntry::ReleaseFileHandle() {
++  if (!open_file_count_) {
++    REXFS_ERROR("Host path entry '{}' released with no open handles", absolute_path());
++    return false;
++  }
++  if (--open_file_count_ || !delete_on_close()) {
++    return true;
++  }
++  return Delete();
++}
++
+ std::unique_ptr<memory::MappedMemory> HostPathEntry::OpenMapped(memory::MappedMemory::Mode mode,
+                                                                 size_t offset, size_t length) {
+   return memory::MappedMemory::Open(host_path_, mode, offset, length);
+diff --git a/src/filesystem/devices/host_path_file.cpp b/src/filesystem/devices/host_path_file.cpp
+index 4c57a18..082f4c5 100644
+--- a/src/filesystem/devices/host_path_file.cpp
++++ b/src/filesystem/devices/host_path_file.cpp
+@@ -11,15 +11,25 @@
+ 
+ #include <rex/filesystem/devices/host_path_entry.h>
+ #include <rex/filesystem/devices/host_path_file.h>
++#include <rex/logging.h>
+ 
+ namespace rex::filesystem {
+ 
+ HostPathFile::HostPathFile(uint32_t file_access, HostPathEntry* entry,
+                            std::unique_ptr<rex::filesystem::FileHandle> file_handle)
+-    : File(file_access, entry), file_handle_(std::move(file_handle)) {}
++    : File(file_access, entry), file_handle_(std::move(file_handle)) {
++  entry->RetainFileHandle();
++}
+ 
+ HostPathFile::~HostPathFile() = default;
+ 
+ void HostPathFile::Destroy() {
++  auto* entry = static_cast<HostPathEntry*>(entry_);
++  const std::string entry_path = entry->absolute_path();
++  file_handle_.reset();
++  if (!entry->ReleaseFileHandle()) {
++    REXFS_ERROR("Failed to delete '{}' while closing a guest handle",
++                entry_path);
++  }
+   delete this;
+ }

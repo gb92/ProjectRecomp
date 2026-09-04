@@ -1,0 +1,16 @@
+diff --git a/src/kernel/xam/xam_content.cpp b/src/kernel/xam/xam_content.cpp
+index 1fb1e16..e01ce36 100644
+--- a/src/kernel/xam/xam_content.cpp
++++ b/src/kernel/xam/xam_content.cpp
+@@ -233,7 +233,10 @@ u32 xeXamContentCreate(u32 user_index, mapped_string root_name, mapped_void cont
+     uint32_t extended_error, length;
+     return run(extended_error, length);
+   } else {
+-    REX_KERNEL_STATE()->CompleteOverlappedDeferredEx(run, overlapped_ptr.guest_address());
++    uint32_t extended_error, length;
++    auto result = run(extended_error, length);
++    REX_KERNEL_STATE()->CompleteOverlappedImmediateEx(overlapped_ptr.guest_address(), result,
++                                                      extended_error, length);
+     return X_ERROR_IO_PENDING;
+   }
+ }

@@ -1,0 +1,98 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 09ac897..f415297 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -23,7 +23,7 @@ if(REXGLUE_ENABLE_TRACY)
+     add_compile_definitions($<$<NOT:$<CONFIG:Release>>:REXGLUE_ENABLE_PROFILING>)
+ endif()
+ if(REXGLUE_ENABLE_PERF_COUNTERS)
+-    add_compile_definitions($<$<NOT:$<CONFIG:Release>>:REXGLUE_ENABLE_PERF_COUNTERS>)
++    add_compile_definitions(REXGLUE_ENABLE_PERF_COUNTERS)
+ endif()
+ 
+ # Graphics backend selection
+diff --git a/include/rex/perf/counter.h b/include/rex/perf/counter.h
+index 167b645..8c8ba04 100644
+--- a/include/rex/perf/counter.h
++++ b/include/rex/perf/counter.h
+@@ -88,6 +88,9 @@ class Profiler {
+   static void Startup() {
+ #ifdef REXGLUE_ENABLE_PROFILING
+     tracy::StartupProfiler();
++#endif
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++    Init();
+ #endif
+   }
+   static void OnThreadEnter(const char* name = nullptr) {
+diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
+index faa4847..9fad729 100644
+--- a/src/core/CMakeLists.txt
++++ b/src/core/CMakeLists.txt
+@@ -119,7 +119,5 @@ endif()
+ 
+ if(REXGLUE_ENABLE_PERF_COUNTERS)
+     target_sources(rexcore PRIVATE perf/counter.cpp)
+-    target_compile_definitions(rexcore PUBLIC
+-        $<$<NOT:$<CONFIG:Release>>:REXGLUE_ENABLE_PERF_COUNTERS>)
++    target_compile_definitions(rexcore PUBLIC REXGLUE_ENABLE_PERF_COUNTERS)
+ endif()
+-
+diff --git a/src/core/perf/counter.cpp b/src/core/perf/counter.cpp
+index 536009e..94b356c 100644
+--- a/src/core/perf/counter.cpp
++++ b/src/core/perf/counter.cpp
+@@ -17,6 +17,7 @@
+ #include <array>
+ #include <atomic>
+ #include <cstdio>
++#include <cstdlib>
+ #include <cstring>
+ 
+ REXCVAR_DEFINE_STRING(perf_log_csv, "", "Perf",
+@@ -79,6 +80,7 @@ static_assert(std::size(kIsGauge) == kNumCounters, "kIsGauge must match CounterI
+ std::FILE* g_csv_file = nullptr;
+ std::string g_csv_path;
+ int g_csv_frame_count = 0;
++bool g_csv_configured = false;
+ 
+ }  // anonymous namespace
+ 
+@@ -133,6 +135,7 @@ void SetCsvLogPath(const std::string& path) {
+   }
+   g_csv_path = path;
+   g_csv_frame_count = 0;
++  g_csv_configured = true;
+ 
+   if (path.empty())
+     return;
+@@ -154,6 +157,15 @@ void SetCsvLogPath(const std::string& path) {
+ }
+ 
+ void WriteCsvFrame() {
++  if (!g_csv_configured) {
++    std::string csv_path = REXCVAR_GET(perf_log_csv);
++    if (csv_path.empty()) {
++      if (const char* env_path = std::getenv("REXGLUE_PERF_LOG_CSV")) {
++        csv_path = env_path;
++      }
++    }
++    SetCsvLogPath(csv_path);
++  }
+   if (!g_csv_file)
+     return;
+ 
+diff --git a/src/system/CMakeLists.txt b/src/system/CMakeLists.txt
+index a1d8258..9482900 100644
+--- a/src/system/CMakeLists.txt
++++ b/src/system/CMakeLists.txt
+@@ -84,8 +84,7 @@ if(REXGLUE_ENABLE_TRACY)
+ endif()
+ 
+ if(REXGLUE_ENABLE_PERF_COUNTERS)
+-    target_compile_definitions(rexruntime PUBLIC
+-        $<$<NOT:$<CONFIG:Release>>:REXGLUE_ENABLE_PERF_COUNTERS>)
++    target_compile_definitions(rexruntime PUBLIC REXGLUE_ENABLE_PERF_COUNTERS)
+ endif()
+ 
+ if(WIN32)

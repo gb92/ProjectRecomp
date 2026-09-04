@@ -1,0 +1,25 @@
+diff --git a/src/system/mmio_handler.cpp b/src/system/mmio_handler.cpp
+index 2b93005..6a9a6ee 100644
+--- a/src/system/mmio_handler.cpp
++++ b/src/system/mmio_handler.cpp
+@@ -402,10 +402,17 @@ bool MMIOHandler::ExceptionCallback(arch::Exception* ex) {
+     }
+   }
+   if (!range) {
+-    // Recheck if the pages are still protected (race condition - another thread
+-    // clears the watch we just hit).
+-    // Do this under the lock so we don't introduce another race condition.
+     auto lock = global_critical_region_.Acquire();
++    // Guest write-watch callbacks already validate watch state and recover stale
++    // writable page protection from heap metadata. Avoid querying
++    // /proc/self/maps from the Linux exception handler for every write fault.
++    if (is_write && access_violation_callback_) {
++      return access_violation_callback_(std::move(lock), access_violation_callback_context_,
++                                        fault_host_address, true);
++    }
++
++    // Recheck read faults in case another thread cleared the watch after this
++    // thread entered the exception handler.
+     memory::PageAccess cur_access;
+     size_t page_length = memory::page_size();
+     memory::QueryProtect(fault_host_address, page_length, cur_access);

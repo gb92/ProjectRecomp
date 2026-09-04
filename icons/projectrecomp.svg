@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img"
+     aria-labelledby="title description">
+  <title id="title">ProjectRecomp logo</title>
+  <desc id="description">A geometric PR monogram on a dark rounded square.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#20242d"/>
+      <stop offset="1" stop-color="#0e1015"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff5263"/>
+      <stop offset="1" stop-color="#c81f38"/>
+    </linearGradient>
+    <mask id="distress-p">
+      <rect width="1024" height="1024" fill="white"/>
+      <path d="M405 190l-7 52m25-49l-15 67m38-61l-12 43m33-30l-18 61
+               M421 542l-7 44m31-50l-14 72m42-82l-9 49m30-62l-18 71
+               M282 572l5 39m34-32l-4 53m45-56l9 43"
+            fill="none" stroke="black" stroke-width="3"/>
+    </mask>
+    <mask id="distress-r">
+      <rect width="1024" height="1024" fill="white"/>
+      <path d="M736 190l-5 45m24-43l-8 61m29-57l-11 48m35-38l-17 57
+               M830 221l-21 52m45-36l-26 61m48-36l-36 61m54-27l-43 51
+               M912 331l-54 32m59-8l-63 24m66 2l-67 8m66 20l-65-7
+               M912 435l-62-20m52 52l-58-34m43 61l-52-45m28 72l-42-54
+               M800 552l35 51m-59-35l31 63m-55-52l18 53"
+            fill="none" stroke="black" stroke-width="3"/>
+    </mask>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="208"
+        fill="url(#background)"/>
+  <path d="M174 786V238h194c128 0 206 65 206 174s-78 174-206 174H274"
+        fill="none" stroke="#f4f6fa" stroke-width="96"
+        stroke-linecap="square" stroke-linejoin="round"
+        mask="url(#distress-p)"/>
+  <g mask="url(#distress-r)">
+    <path d="M546 786V238h168c111 0 178 57 178 153s-67 153-178 153H646"
+          fill="none" stroke="url(#accent)" stroke-width="96"
+          stroke-linecap="square" stroke-linejoin="round"/>
+    <path d="M724 544L876 786" fill="none" stroke="url(#accent)"
+          stroke-width="96" stroke-linecap="square" stroke-linejoin="round"/>
+  </g>
+</svg>

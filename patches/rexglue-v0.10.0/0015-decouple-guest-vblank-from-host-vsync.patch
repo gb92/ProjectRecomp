@@ -1,0 +1,26 @@
+diff --git a/src/graphics/graphics_system.cpp b/src/graphics/graphics_system.cpp
+--- a/src/graphics/graphics_system.cpp
++++ b/src/graphics/graphics_system.cpp
+@@ -39,6 +39,10 @@ REXCVAR_DEFINE_BOOL(store_shaders, true, "GPU",
+                     "Store shaders persistently and load them when loading games to avoid "
+                     "runtime spikes and freezes when playing the game not for the first time.");
+ 
++REXCVAR_DEFINE_BOOL(
++    gpu_guest_vsync_when_host_unsynced, true, "GPU",
++    "Keep guest VBlank at the configured video refresh rate when host VSync is disabled");
++
+ namespace {
+ 
+ rex::graphics::CommandProcessor::SwapPostEffect ParseSwapPostEffect(
+@@ -160,8 +164,10 @@ X_STATUS GraphicsSystem::SetupGuestGpu() {
+         uint64_t last_frame_time = chrono::Clock::QueryGuestTickCount();
+         while (vsync_worker_running_) {
+           uint64_t current_time = chrono::Clock::QueryGuestTickCount();
++          const bool guest_vsync_enabled =
++              REXCVAR_GET(vsync) || REXCVAR_GET(gpu_guest_vsync_when_host_unsynced);
+           uint64_t interval_ticks =
+-              REXCVAR_GET(vsync) ? vsync_interval_ticks : no_vsync_interval_ticks;
++              guest_vsync_enabled ? vsync_interval_ticks : no_vsync_interval_ticks;
+           while (current_time - last_frame_time >= interval_ticks) {
+             MarkVblank();
+             last_frame_time += interval_ticks;

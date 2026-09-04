@@ -1,0 +1,25 @@
+diff --git a/src/core/perf/counter.cpp b/src/core/perf/counter.cpp
+--- a/src/core/perf/counter.cpp
++++ b/src/core/perf/counter.cpp
+@@ -123,6 +123,7 @@ void Init() {
+     c.store(0, std::memory_order_relaxed);
+   for (auto& s : g_snapshot)
+     s.store(0, std::memory_order_relaxed);
++  SetCsvLogPath(REXCVAR_GET(perf_log_csv));
+ }
+ 
+ void SetCsvLogPath(const std::string& path) {
+diff --git a/src/system/runtime.cpp b/src/system/runtime.cpp
+--- a/src/system/runtime.cpp
++++ b/src/system/runtime.cpp
+@@ -95,6 +95,10 @@ X_STATUS Runtime::Setup(RuntimeConfig config) {
+   }
+   instance_ = this;
+ 
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++  rex::perf::Init();
++#endif
++
+   auto fail = [this](X_STATUS status, std::string_view reason) {
+     REXSYS_ERROR("Runtime::Setup failed: {}", reason);
+     Shutdown();

@@ -1,0 +1,43 @@
+name: Feature request
+description: Suggest an enhancement to ProjectRecomp
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I searched for an existing request.
+          required: true
+        - label: This request does not require distributing copyrighted game files.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or limitation
+      description: Explain the user problem rather than only the proposed implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: platforms
+    attributes:
+      label: Relevant platforms
+      multiple: true
+      options:
+        - Windows x86-64
+        - Linux x86-64
+        - Future or unsupported platform
+    validations:
+      required: true

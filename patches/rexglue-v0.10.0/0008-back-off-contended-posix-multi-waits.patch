@@ -1,0 +1,21 @@
+diff --git a/src/core/threading_posix.cpp b/src/core/threading_posix.cpp
+index 9ac8d15..9aaa1cd 100644
+--- a/src/core/threading_posix.cpp
++++ b/src/core/threading_posix.cpp
+@@ -367,6 +367,15 @@ class PosixConditionBase {
+ 
+       if (!all_locked) {
+         locks.clear();
+-        std::this_thread::yield();
++        auto now = std::chrono::steady_clock::now();
++        if (now >= end_time) {
++          return std::make_pair<WaitResult, size_t>(WaitResult::kTimeout, 0);
++        }
++        auto backoff = std::chrono::microseconds(100);
++        if (end_time != std::chrono::steady_clock::time_point::max()) {
++          backoff = std::min(
++              backoff, std::chrono::duration_cast<std::chrono::microseconds>(end_time - now));
++        }
++        std::this_thread::sleep_for(backoff);
+         continue;
+       }

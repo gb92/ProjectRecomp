@@ -1,0 +1,58 @@
+diff --git a/src/core/memory_posix.cpp b/src/core/memory_posix.cpp
+index 03f83e1..8de7301 100644
+--- a/src/core/memory_posix.cpp
++++ b/src/core/memory_posix.cpp
+@@ -120,16 +120,45 @@ struct LinuxMapEntry {
+   char perms[5] = {};
+ };
+ 
+-// Parse a line from /proc/self/maps into a LinuxMapEntry
++static bool ParseHexAddress(const char*& cursor, uintptr_t& value) {
++  value = 0;
++  bool parsed_digit = false;
++  while (true) {
++    const char c = *cursor;
++    uint8_t digit;
++    if (c >= '0' && c <= '9') {
++      digit = static_cast<uint8_t>(c - '0');
++    } else if (c >= 'a' && c <= 'f') {
++      digit = static_cast<uint8_t>(c - 'a' + 10);
++    } else if (c >= 'A' && c <= 'F') {
++      digit = static_cast<uint8_t>(c - 'A' + 10);
++    } else {
++      break;
++    }
++    parsed_digit = true;
++    value = (value << 4) | digit;
++    ++cursor;
++  }
++  return parsed_digit;
++}
++
++// Parse the fields needed from /proc/self/maps without formatted I/O. QueryProtect
++// runs from the access-violation handler, where sscanf is both costly and unsafe.
+ static bool ParseProcMapsLine(const std::string& line, LinuxMapEntry& out) {
+   out = LinuxMapEntry{};
+-  unsigned long long start = 0, end = 0;
+-  char perms[5] = {};
+-  const int matched = std::sscanf(line.c_str(), "%llx-%llx %4s", &start, &end, perms);
+-  if (matched < 3)
++  const char* cursor = line.c_str();
++  if (!ParseHexAddress(cursor, out.start) || *cursor++ != '-' ||
++      !ParseHexAddress(cursor, out.end) || *cursor++ != ' ') {
+     return false;
+-  out.start = static_cast<uintptr_t>(start);
+-  out.end = static_cast<uintptr_t>(end);
+-  std::memcpy(out.perms, perms, sizeof(out.perms));
++  }
++  while (*cursor == ' ') {
++    ++cursor;
++  }
++  for (size_t i = 0; i < 4; ++i) {
++    if (!cursor[i] || cursor[i] == ' ') {
++      return false;
++    }
++    out.perms[i] = cursor[i];
++  }
+   return out.start < out.end;
+ }

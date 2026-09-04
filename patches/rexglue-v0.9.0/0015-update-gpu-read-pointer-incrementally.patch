@@ -1,0 +1,32 @@
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+index c41b9c9..2be89a5 100644
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -714,6 +714,9 @@ uint32_t CommandProcessor::ExecutePrimaryBuffer(uint32_t read_index, uint32_t wr
+   memory::RingBuffer reader(memory_->TranslatePhysical(primary_buffer_ptr_), primary_buffer_size_);
+   reader.set_read_offset(read_index * sizeof(uint32_t));
+   reader.set_write_offset(write_index * sizeof(uint32_t));
++  uint32_t last_writeback_index = read_index;
++  const uint32_t ring_dword_count = uint32_t(primary_buffer_size_ / sizeof(uint32_t));
++  const uint32_t writeback_frequency = std::max(uint32_t(1), read_ptr_update_freq_);
+   do {
+     if (!ExecutePacket(&reader)) {
+       // This probably should be fatal - but we're going to continue anyways.
+@@ -721,6 +724,17 @@ uint32_t CommandProcessor::ExecutePrimaryBuffer(uint32_t read_index, uint32_t wr
+       assert_always();
+       break;
+     }
++    if (read_ptr_writeback_ptr_) {
++      const uint32_t current_read_index =
++          uint32_t(reader.read_offset() / sizeof(uint32_t));
++      const uint32_t dwords_since_writeback =
++          (current_read_index + ring_dword_count - last_writeback_index) % ring_dword_count;
++      if (dwords_since_writeback >= writeback_frequency) {
++        memory::store_and_swap<uint32_t>(
++            memory_->TranslatePhysical(read_ptr_writeback_ptr_), current_read_index);
++        last_writeback_index = current_read_index;
++      }
++    }
+   } while (reader.read_count());
+ 
+   OnPrimaryBufferEnd();

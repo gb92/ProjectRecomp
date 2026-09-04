@@ -1,0 +1,289 @@
+diff --git a/include/rex/input/sdl/sdl_input_driver.h b/include/rex/input/sdl/sdl_input_driver.h
+index 92bec81..63ad3ce 100644
+--- a/include/rex/input/sdl/sdl_input_driver.h
++++ b/include/rex/input/sdl/sdl_input_driver.h
+@@ -13,6 +13,7 @@
+ 
+ #include <array>
+ #include <atomic>
++#include <chrono>
+ #include <mutex>
+ #include <optional>
+ #include <vector>
+@@ -53,6 +54,13 @@ class SDLInputDriver final : public InputDriver, public rex::ui::WindowListener
+     bool is_active;
+   };
+ 
++  struct ReplayEvent {
++    uint64_t timestamp_ns;
++    uint16_t type;
++    uint16_t code;
++    int32_t value;
++  };
++
+   enum class RepeatState {
+     Idle,       // no buttons pressed or repeating has ended
+     Waiting,    // a button is held and the delay is awaited
+@@ -86,6 +94,9 @@ class SDLInputDriver final : public InputDriver, public rex::ui::WindowListener
+   bool TestSDLVersion() const;
+   void UpdateXCapabilities(ControllerState& state);
+   void QueueControllerUpdate();
++  bool LoadReplay();
++  void UpdateReplay();
++  void ApplyReplayEvent(const ReplayEvent& event);
+ 
+   rex::ui::Window* attached_window_ = nullptr;
+   bool sdl_events_initialized_;
+@@ -97,6 +108,10 @@ class SDLInputDriver final : public InputDriver, public rex::ui::WindowListener
+   std::mutex event_queue_mutex_;
+   std::vector<SDL_Event> pending_events_;
+   std::array<KeystrokeState, HID_SDL_USER_COUNT> keystroke_states_;
++  std::vector<ReplayEvent> replay_events_;
++  size_t replay_event_index_ = 0;
++  std::chrono::steady_clock::time_point replay_start_time_;
++  X_INPUT_STATE replay_state_ = {};
+ };
+ 
+ }  // namespace rex::input::sdl
+diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver.cpp
+index bdef585..b1d4544 100644
+--- a/src/input/sdl/sdl_input_driver.cpp
++++ b/src/input/sdl/sdl_input_driver.cpp
+@@ -10,7 +10,10 @@
+  */
+ 
+ #include <array>
++#include <algorithm>
++#include <cstdlib>
+ #include <filesystem>
++#include <fstream>
+ 
+ #include <rex/assert.h>
+ #include <rex/chrono/clock.h>
+@@ -38,6 +41,9 @@ SDLInputDriver::SDLInputDriver(rex::ui::Window* window, size_t window_z_order)
+ SDLInputDriver::~SDLInputDriver() {}
+ 
+ X_STATUS SDLInputDriver::Setup() {
++  if (!LoadReplay()) {
++    return X_STATUS_UNSUCCESSFUL;
++  }
+   if (!TestSDLVersion()) {
+     return X_STATUS_UNSUCCESSFUL;
+   }
+@@ -142,6 +148,22 @@ void SDLInputDriver::OnGotFocus(rex::ui::UISetupEvent&) {}
+ 
+ X_RESULT SDLInputDriver::GetCapabilities(uint32_t user_index, uint32_t flags,
+                                          X_INPUT_CAPABILITIES* out_caps) {
++  if (!replay_events_.empty()) {
++    if (user_index != 0 || !out_caps) {
++      return user_index == 0 ? X_ERROR_BAD_ARGUMENTS : X_ERROR_DEVICE_NOT_CONNECTED;
++    }
++    std::memset(out_caps, 0, sizeof(*out_caps));
++    out_caps->type = 0x01;
++    out_caps->sub_type = 0x01;
++    out_caps->gamepad.buttons = 0xF3FF;
++    out_caps->gamepad.left_trigger = 0xFF;
++    out_caps->gamepad.right_trigger = 0xFF;
++    out_caps->gamepad.thumb_lx = INT16_MAX;
++    out_caps->gamepad.thumb_ly = INT16_MAX;
++    out_caps->gamepad.thumb_rx = INT16_MAX;
++    out_caps->gamepad.thumb_ry = INT16_MAX;
++    return X_ERROR_SUCCESS;
++  }
+   assert(sdl_events_initialized_ && SDL_Gamepad_initialized_);
+   if (user_index >= HID_SDL_USER_COUNT || !out_caps) {
+     return X_ERROR_BAD_ARGUMENTS;
+@@ -166,6 +188,17 @@ X_RESULT SDLInputDriver::GetCapabilities(uint32_t user_index, uint32_t flags,
+ }
+ 
+ X_RESULT SDLInputDriver::GetState(uint32_t user_index, X_INPUT_STATE* out_state) {
++  if (!replay_events_.empty()) {
++    if (user_index != 0) {
++      return X_ERROR_DEVICE_NOT_CONNECTED;
++    }
++    if (!out_state) {
++      return X_ERROR_BAD_ARGUMENTS;
++    }
++    UpdateReplay();
++    *out_state = replay_state_;
++    return X_ERROR_SUCCESS;
++  }
+   assert(sdl_events_initialized_ && SDL_Gamepad_initialized_);
+   if (user_index >= HID_SDL_USER_COUNT) {
+     return X_ERROR_BAD_ARGUMENTS;
+@@ -202,6 +235,9 @@ X_RESULT SDLInputDriver::GetState(uint32_t user_index, X_INPUT_STATE* out_state)
+ }
+ 
+ X_RESULT SDLInputDriver::SetState(uint32_t user_index, X_INPUT_VIBRATION* vibration) {
++  if (!replay_events_.empty()) {
++    return user_index == 0 ? X_ERROR_SUCCESS : X_ERROR_DEVICE_NOT_CONNECTED;
++  }
+   assert(sdl_events_initialized_ && SDL_Gamepad_initialized_);
+   if (user_index >= HID_SDL_USER_COUNT) {
+     return X_ERROR_BAD_ARGUMENTS;
+@@ -230,6 +266,9 @@ X_RESULT SDLInputDriver::SetState(uint32_t user_index, X_INPUT_VIBRATION* vibrat
+ 
+ X_RESULT SDLInputDriver::GetKeystroke(uint32_t users, uint32_t flags,
+                                       X_INPUT_KEYSTROKE* out_keystroke) {
++  if (!replay_events_.empty()) {
++    return users == 0 || users == 0xFF ? X_ERROR_EMPTY : X_ERROR_DEVICE_NOT_CONNECTED;
++  }
+   // TODO(JoelLinn): Figure out the flags
+   // https://github.com/evilC/UCR/blob/0489929e2a8e39caa3484c67f3993d3fba39e46f/Libraries/XInput.ahk#L85-L98
+   assert(sdl_events_initialized_ && SDL_Gamepad_initialized_);
+@@ -237,6 +276,7 @@ X_RESULT SDLInputDriver::GetKeystroke(uint32_t users, uint32_t flags,
+   if (users >= HID_SDL_USER_COUNT && !user_any) {
+     return X_ERROR_BAD_ARGUMENTS;
+   }
++
+   if (!out_keystroke) {
+     return X_ERROR_BAD_ARGUMENTS;
+   }
+@@ -380,6 +420,147 @@ X_RESULT SDLInputDriver::GetKeystroke(uint32_t users, uint32_t flags,
+   return X_ERROR_EMPTY;
+ }
+ 
++bool SDLInputDriver::LoadReplay() {
++  const char* replay_path = std::getenv("REXGLUE_INPUT_REPLAY");
++  if (!replay_path || !replay_path[0]) {
++    return true;
++  }
++
++  std::ifstream stream(replay_path);
++  if (!stream) {
++    REXLOG_ERROR("SDL input replay: failed to open '{}'", replay_path);
++    return false;
++  }
++
++  ReplayEvent event;
++  while (stream >> event.timestamp_ns >> event.type >> event.code >> event.value) {
++    replay_events_.push_back(event);
++  }
++  if (!stream.eof() || replay_events_.empty()) {
++    REXLOG_ERROR("SDL input replay: invalid or empty trace '{}'", replay_path);
++    replay_events_.clear();
++    return false;
++  }
++
++  replay_start_time_ = std::chrono::steady_clock::now();
++  REXLOG_INFO("SDL input replay: loaded {} events from '{}'", replay_events_.size(),
++              replay_path);
++  return true;
++}
++
++void SDLInputDriver::UpdateReplay() {
++  const uint64_t elapsed_ns = static_cast<uint64_t>(
++      std::chrono::duration_cast<std::chrono::nanoseconds>(
++          std::chrono::steady_clock::now() - replay_start_time_)
++          .count());
++  bool changed = false;
++  while (replay_event_index_ < replay_events_.size() &&
++         replay_events_[replay_event_index_].timestamp_ns <= elapsed_ns) {
++    const ReplayEvent& event = replay_events_[replay_event_index_++];
++    if (event.type != 0) {
++      ApplyReplayEvent(event);
++      changed = true;
++    }
++  }
++  if (changed) {
++    replay_state_.packet_number =
++        static_cast<uint32_t>(replay_state_.packet_number) + 1;
++  }
++}
++
++void SDLInputDriver::ApplyReplayEvent(const ReplayEvent& event) {
++  X_INPUT_GAMEPAD& gamepad = replay_state_.gamepad;
++  if (event.type == 1) {
++    uint16_t button = 0;
++    switch (event.code) {
++      case 304:
++        button = X_INPUT_GAMEPAD_A;
++        break;
++      case 305:
++        button = X_INPUT_GAMEPAD_B;
++        break;
++      case 307:
++        button = X_INPUT_GAMEPAD_X;
++        break;
++      case 308:
++        button = X_INPUT_GAMEPAD_Y;
++        break;
++      case 310:
++        button = X_INPUT_GAMEPAD_LEFT_SHOULDER;
++        break;
++      case 311:
++        button = X_INPUT_GAMEPAD_RIGHT_SHOULDER;
++        break;
++      case 314:
++        button = X_INPUT_GAMEPAD_BACK;
++        break;
++      case 315:
++        button = X_INPUT_GAMEPAD_START;
++        break;
++      case 316:
++        button = X_INPUT_GAMEPAD_GUIDE;
++        break;
++      case 317:
++        button = X_INPUT_GAMEPAD_LEFT_THUMB;
++        break;
++      case 318:
++        button = X_INPUT_GAMEPAD_RIGHT_THUMB;
++        break;
++      default:
++        return;
++    }
++    uint16_t buttons = gamepad.buttons;
++    gamepad.buttons = event.value ? buttons | button : buttons & ~button;
++    return;
++  }
++
++  if (event.type != 3) {
++    return;
++  }
++  switch (event.code) {
++    case 0:
++      gamepad.thumb_lx = static_cast<int16_t>(event.value);
++      break;
++    case 1:
++      gamepad.thumb_ly = static_cast<int16_t>(~event.value);
++      break;
++    case 2:
++      gamepad.left_trigger = static_cast<uint8_t>(std::clamp(event.value, 0, 255));
++      break;
++    case 3:
++      gamepad.thumb_rx = static_cast<int16_t>(event.value);
++      break;
++    case 4:
++      gamepad.thumb_ry = static_cast<int16_t>(~event.value);
++      break;
++    case 5:
++      gamepad.right_trigger = static_cast<uint8_t>(std::clamp(event.value, 0, 255));
++      break;
++    case 16: {
++      uint16_t buttons = gamepad.buttons;
++      buttons &= ~(X_INPUT_GAMEPAD_DPAD_LEFT | X_INPUT_GAMEPAD_DPAD_RIGHT);
++      if (event.value < 0) {
++        buttons |= X_INPUT_GAMEPAD_DPAD_LEFT;
++      } else if (event.value > 0) {
++        buttons |= X_INPUT_GAMEPAD_DPAD_RIGHT;
++      }
++      gamepad.buttons = buttons;
++      break;
++    }
++    case 17: {
++      uint16_t buttons = gamepad.buttons;
++      buttons &= ~(X_INPUT_GAMEPAD_DPAD_UP | X_INPUT_GAMEPAD_DPAD_DOWN);
++      if (event.value < 0) {
++        buttons |= X_INPUT_GAMEPAD_DPAD_UP;
++      } else if (event.value > 0) {
++        buttons |= X_INPUT_GAMEPAD_DPAD_DOWN;
++      }
++      gamepad.buttons = buttons;
++      break;
++    }
++  }
++}
++
+ void SDLInputDriver::HandleEvent(const SDL_Event& event) {
+   // This callback will likely run on the thread that posts the event, which
+   // may be a dedicated thread SDL has created for the joystick subsystem.

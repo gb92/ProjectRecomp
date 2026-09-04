@@ -1,0 +1,65 @@
+name: Build problem
+description: Report a reproducible configuration, compilation, or linking failure
+title: "[Build]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach private game files. Paste only the relevant compiler or tool output.
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I cloned recursively or ran `git submodule update --init --recursive`.
+          required: true
+        - label: I followed the current README rather than an older guide.
+          required: true
+        - label: I searched for an existing report.
+          required: true
+        - label: This report contains no game files or download links.
+          required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows 11 x86-64
+        - Windows 10 x86-64
+        - Linux x86-64
+        - Unsupported platform
+    validations:
+      required: true
+  - type: input
+    id: revision
+    attributes:
+      label: ProjectRecomp revision
+      placeholder: 12e6f9e
+    validations:
+      required: true
+  - type: input
+    id: toolchain
+    attributes:
+      label: Toolchain versions
+      placeholder: CMake 3.31, Clang 19, Ninja 1.12
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output
+      description: Remove personal paths, tokens, and other sensitive information.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: attempts
+    attributes:
+      label: Troubleshooting attempted

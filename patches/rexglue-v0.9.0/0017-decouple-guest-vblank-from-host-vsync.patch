@@ -1,0 +1,23 @@
+diff --git a/src/graphics/graphics_system.cpp b/src/graphics/graphics_system.cpp
+index 19c9257..4b1f57e 100644
+--- a/src/graphics/graphics_system.cpp
++++ b/src/graphics/graphics_system.cpp
+@@ -64,6 +64,8 @@ REXCVAR_DEFINE_BOOL(gpu_vsync_busy_wait, false, "GPU",
+                     "Keep the guest VSync worker runnable between ticks");
++REXCVAR_DEFINE_BOOL(gpu_guest_vsync_when_host_unsynced, false, "GPU",
++                    "Keep guest VBlank at the configured video refresh rate when host VSync is disabled");
+ 
+ namespace rex::graphics {
+ 
+ // Nvidia Optimus/AMD PowerXpress support.
+ // These exports force the process to trigger the discrete GPU in multi-GPU
+@@ -167,7 +169,8 @@ X_STATUS GraphicsSystem::SetupGuestGpu() {
+         uint64_t last_frame_time = chrono::Clock::QueryGuestTickCount();
+         while (vsync_worker_running_) {
+           uint64_t current_time = chrono::Clock::QueryGuestTickCount();
+-          const bool vsync_enabled = REXCVAR_GET(vsync);
++          const bool vsync_enabled =
++              REXCVAR_GET(vsync) || REXCVAR_GET(gpu_guest_vsync_when_host_unsynced);
+           uint64_t interval_ticks =
+               vsync_enabled ? vsync_interval_ticks : no_vsync_interval_ticks;
+           while (current_time - last_frame_time >= interval_ticks) {

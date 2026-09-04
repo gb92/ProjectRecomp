@@ -1,0 +1,23 @@
+diff --git a/src/ui/vulkan/vulkan_presenter.cpp b/src/ui/vulkan/vulkan_presenter.cpp
+index 54d34f8..8a0d011 100644
+--- a/src/ui/vulkan/vulkan_presenter.cpp
++++ b/src/ui/vulkan/vulkan_presenter.cpp
+@@ -55,5 +55,9 @@ REXCVAR_DEFINE_BOOL(vulkan_allow_present_mode_fifo_relaxed, true, "UI/Vulkan",
+                     "Allow FIFO relaxed present mode when vsync is disabled");
+ 
++REXCVAR_DEFINE_BOOL(vulkan_allow_present_mode_fifo_relaxed_with_vsync, false,
++                    "UI/Vulkan",
++                    "Allow FIFO relaxed present mode while vsync is enabled");
++
+ namespace rex {
+ namespace ui {
+ namespace vulkan {
+@@ -1361,5 +1365,7 @@ VkSwapchainKHR VulkanPresenter::PaintContext::CreateSwapchainForVulkanSurface(
+     // Allowing dropping frames to reduce latency, but no tearing.
+     swapchain_create_info.presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+-  } else if (!vsync_enabled && REXCVAR_GET(vulkan_allow_present_mode_fifo_relaxed) &&
++  } else if ((!vsync_enabled ||
++              REXCVAR_GET(vulkan_allow_present_mode_fifo_relaxed_with_vsync)) &&
++             REXCVAR_GET(vulkan_allow_present_mode_fifo_relaxed) &&
+              std::find(present_modes.cbegin(), present_modes.cend(),
+                        VK_PRESENT_MODE_FIFO_RELAXED_KHR) != present_modes.cend()) {

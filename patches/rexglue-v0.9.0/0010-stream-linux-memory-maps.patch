@@ -1,0 +1,70 @@
+diff --git a/src/core/memory_posix.cpp b/src/core/memory_posix.cpp
+index 8deaa54..055b031 100644
+--- a/src/core/memory_posix.cpp
++++ b/src/core/memory_posix.cpp
+@@ -164,21 +164,54 @@ static bool ParseProcMapsLine(const std::string& line, LinuxMapEntry& out) {
+ 
+ // Find the mapping entry in /proc/self/maps that contains the given address
+ static bool FindEntryForAddress(void* address, LinuxMapEntry& out_entry) {
+   const uintptr_t addr = reinterpret_cast<uintptr_t>(address);
+-  std::ifstream maps("/proc/self/maps");
+-  if (!maps.is_open())
++  const int maps_fd = open("/proc/self/maps", O_RDONLY | O_CLOEXEC);
++  if (maps_fd < 0) {
+     return false;
+-  std::string line;
+-  while (std::getline(maps, line)) {
+-    LinuxMapEntry e;
+-    if (!ParseProcMapsLine(line, e))
+-      continue;
+-    if (addr >= e.start && addr < e.end) {
+-      out_entry = e;
+-      return true;
++  }
++
++  char read_buffer[4096];
++  char line_buffer[256];
++  size_t line_length = 0;
++  bool line_parsed = false;
++  bool found = false;
++  while (!found) {
++    const ssize_t bytes_read = read(maps_fd, read_buffer, sizeof(read_buffer));
++    if (bytes_read <= 0) {
++      break;
++    }
++    for (ssize_t i = 0; i < bytes_read; ++i) {
++      if (read_buffer[i] == '\n') {
++        if (!line_parsed) {
++          line_buffer[line_length] = '\0';
++          LinuxMapEntry entry;
++          if (ParseProcMapsLine(line_buffer, entry) &&
++              addr >= entry.start && addr < entry.end) {
++            out_entry = entry;
++            found = true;
++            break;
++          }
++        }
++        line_length = 0;
++        line_parsed = false;
++      } else if (!line_parsed) {
++        line_buffer[line_length++] = read_buffer[i];
++        if (line_length == sizeof(line_buffer) - 1) {
++          line_buffer[line_length] = '\0';
++          LinuxMapEntry entry;
++          if (ParseProcMapsLine(line_buffer, entry) &&
++              addr >= entry.start && addr < entry.end) {
++            out_entry = entry;
++            found = true;
++            break;
++          }
++          line_parsed = true;
++        }
++      }
+     }
+   }
+-  return false;
++  close(maps_fd);
++  return found;
+ }
+ 
+ // Check if [base, base+length) is fully covered by existing mappings (no gaps)

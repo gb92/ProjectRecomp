@@ -1,0 +1,111 @@
+# Tony Hawk's Project 8 (Xbox 360) - ReXGlue Project Manifest
+
+[project]
+name = "thp8"
+sdk_version = "0.10.0"
+
+[entrypoint]
+file_path = "../private/unpatched-game-full/default.xex"
+out_directory_path = "../generated"
+
+# Conservative: all registers in context (same as XenonRecomp config)
+skip_lr = true
+skip_msr = true
+ctr_as_local = false
+xer_as_local = false
+cr_as_local = false
+reserved_as_local = false
+non_argument_as_local = false
+non_volatile_as_local = false
+generate_exception_handlers = false
+
+[entrypoint.analysis]
+max_jump_extension = 65536
+data_region_threshold = 16
+
+# Function boundaries for the unpatched base executable.
+[entrypoint.functions]
+0x8241F518 = {}
+0x8241FE90 = { parent = 0x8241F8D0 }
+0x824127D8 = {}
+0x82418220 = {}
+0x824A3378 = {}
+0x824FDB98 = {}
+0x822B58D0 = {}
+0x822B58E8 = {}
+0x8247AD00 = { parent = 0x8247AA98 }
+0x8247AD18 = { parent = 0x8247AA98 }
+0x8247AD30 = { parent = 0x8247AA98 }
+0x8247AD48 = { parent = 0x8247AA98 }
+0x8247AD60 = { parent = 0x8247AA98 }
+0x82290F28 = {}
+0x8260DF40 = {}
+0x8237BC60 = {}
+0x8237B458 = { end = 0x8237B48C }
+0x822FE698 = { parent = 0x822FE5B8 }
+0x822FE6B8 = { parent = 0x822FE5B8 }
+0x822FE3A8 = { parent = 0x822FE2DC }
+0x822FE6A8 = { parent = 0x822FE5B8 }
+0x822FE658 = { parent = 0x822FE5B8 }
+
+# Base executable entry points and ranges recovered during runtime validation.
+0x8209A4B8 = {}
+0x8209A588 = {}
+0x8209A6B8 = {}
+0x8209A6E8 = {}
+0x821AB770 = {}
+0x821AB7B8 = { parent = 0x821AB770 }
+0x821AB804 = { parent = 0x821AB770 }
+0x821AB838 = { parent = 0x821AB770 }
+0x821AB878 = { parent = 0x821AB770 }
+0x821AB918 = { parent = 0x821AB770 }
+0x821AB958 = { parent = 0x821AB770 }
+0x821ABA18 = { parent = 0x821AB770 }
+0x821ABA58 = { parent = 0x821AB770 }
+0x821ABA98 = { parent = 0x821AB770 }
+0x821ABAD8 = { parent = 0x821AB770 }
+0x821ABB18 = { parent = 0x821AB770 }
+0x821ABB58 = { parent = 0x821AB770 }
+0x821ABB98 = { parent = 0x821AB770 }
+0x821ABBD8 = { parent = 0x821AB770 }
+0x821ABC18 = { parent = 0x821AB770 }
+0x821ABC58 = { parent = 0x821AB770 }
+0x822FE2DC = { end = 0x822FE3CC }
+0x823DF0A0 = {}
+0x823DF108 = {}
+0x823DF1F0 = {}
+0x823DF2E0 = {}
+0x823DF3D8 = {}
+
+# Call targets missed by automatic discovery in the base executable.
+0x822FDCC8 = {}
+0x822FDDC0 = {}
+0x822FDF98 = {}
+0x822FDFD8 = {}
+0x822FDFE8 = {}
+0x822FDFF8 = {}
+0x8230A318 = {}
+0x824182E0 = {}
+0x824213E8 = {}
+0x82412038 = {}
+0x824A2D30 = {}
+0x821F10B8 = {}
+0x820B7970 = { end = 0x820B7988 }
+0x824FD4A8 = {}
+0x822B53A8 = {}
+0x822B53C0 = {}
+0x8247A708 = {}
+0x8247A720 = {}
+0x8247A738 = {}
+0x8247A750 = {}
+0x8247A768 = {}
+0x82290A40 = {}
+0x8260D7A0 = {}
+0x82607D70 = {}
+
+# CRT function mappingscan be added here once addresses are verified via Ghidra
+# [rexcrt]
+# RtlAllocateHeap = 0x????????
+# RtlFreeHeap = 0x????????
+# RtlSizeHeap = 0x????????
+# RtlReAllocateHeap = 0x????????

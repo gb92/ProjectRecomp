@@ -1,0 +1,87 @@
+diff --git a/include/rex/graphics/command_processor.h b/include/rex/graphics/command_processor.h
+index 6998a45..cc82672 100644
+--- a/include/rex/graphics/command_processor.h
++++ b/include/rex/graphics/command_processor.h
+@@ -270,6 +270,7 @@ class CommandProcessor {
+   std::vector<uint32_t> me_bin_;
+ 
+   uint32_t counter_ = 0;
++  uint64_t last_swap_tick_ = 0;
+ 
+   uint32_t primary_buffer_ptr_ = 0;
+   uint32_t primary_buffer_size_ = 0;
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+index 60efcd3..ca2143f 100644
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -1070,15 +1070,15 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(memory::RingBuffer* reader, ui
+ 
+ #ifdef REXGLUE_ENABLE_PERF_COUNTERS
+   {
+-    static uint64_t last_frame_tick = 0;
+-    uint64_t now = rex::chrono::Clock::QueryHostTickCount();
+-    if (last_frame_tick) {
+-      uint64_t freq = rex::chrono::Clock::QueryHostTickFrequency();
+-      int64_t dt_us = static_cast<int64_t>((now - last_frame_tick) * 1000000 / freq);
+-      PROFILE_FRAME_TIME_US(dt_us);
+-      PROFILE_FPS(freq / (now - last_frame_tick));
+-    }
+-    last_frame_tick = now;
++    const uint64_t now = rex::chrono::Clock::QueryHostTickCount();
++    const uint64_t frequency = rex::chrono::Clock::QueryHostTickFrequency();
++    if (last_swap_tick_ && now > last_swap_tick_ && frequency) {
++      const uint64_t elapsed_ticks = now - last_swap_tick_;
++      PROFILE_FRAME_TIME_US(
++          static_cast<int64_t>(elapsed_ticks * 1000000 / frequency));
++      PROFILE_FPS(frequency / elapsed_ticks);
++    }
++    last_swap_tick_ = now;
+   }
+ #endif
+   rex::perf::Profiler::Flip();
+diff --git a/src/ui/vulkan/vulkan_presenter.cpp b/src/ui/vulkan/vulkan_presenter.cpp
+index 30bafba..54d34f8 100644
+--- a/src/ui/vulkan/vulkan_presenter.cpp
++++ b/src/ui/vulkan/vulkan_presenter.cpp
+@@ -47,13 +47,13 @@ REXCVAR_DEFINE_BOOL(present_render_pass_clear, true, "UI/Presenter",
+                     "Clear render pass during presentation");
+ 
+ REXCVAR_DEFINE_BOOL(vulkan_allow_present_mode_immediate, true, "UI/Vulkan",
+-                    "Allow immediate present mode (no vsync)");
++                    "Allow immediate present mode when vsync is disabled");
+ 
+ REXCVAR_DEFINE_BOOL(vulkan_allow_present_mode_mailbox, true, "UI/Vulkan",
+-                    "Allow mailbox present mode (triple buffering)");
++                    "Allow mailbox present mode when vsync is disabled");
+ 
+ REXCVAR_DEFINE_BOOL(vulkan_allow_present_mode_fifo_relaxed, true, "UI/Vulkan",
+-                    "Allow FIFO relaxed present mode");
++                    "Allow FIFO relaxed present mode when vsync is disabled");
+ 
+ namespace rex {
+ namespace ui {
+@@ -1347,19 +1347,21 @@ VkSwapchainKHR VulkanPresenter::PaintContext::CreateSwapchainForVulkanSurface(
+   // interfering with GPU command processing, and also to allow tearing so
+   // variable refresh rate may be used where it's available.
+   // Note: If the priorities here are changes, update the cvar descriptions.
+-  if (REXCVAR_GET(vulkan_allow_present_mode_immediate) &&
++  const bool vsync_enabled =
++      rex::cvar::GetFlagInfo("vsync") && REXCVAR_QUERY(bool, vsync);
++  if (!vsync_enabled && REXCVAR_GET(vulkan_allow_present_mode_immediate) &&
+       std::find(present_modes.cbegin(), present_modes.cend(), VK_PRESENT_MODE_IMMEDIATE_KHR) !=
+           present_modes.cend()) {
+     // Allowing tearing to reduce latency, and possibly variable refresh rate
+     // (though on Windows with borderless fullscreen, GDI copying is used
+     // instead of independent flip, so it's not supported there).
+     swapchain_create_info.presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+-  } else if (REXCVAR_GET(vulkan_allow_present_mode_mailbox) &&
++  } else if (!vsync_enabled && REXCVAR_GET(vulkan_allow_present_mode_mailbox) &&
+              std::find(present_modes.cbegin(), present_modes.cend(), VK_PRESENT_MODE_MAILBOX_KHR) !=
+                  present_modes.cend()) {
+     // Allowing dropping frames to reduce latency, but no tearing.
+     swapchain_create_info.presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+-  } else if (REXCVAR_GET(vulkan_allow_present_mode_fifo_relaxed) &&
++  } else if (!vsync_enabled && REXCVAR_GET(vulkan_allow_present_mode_fifo_relaxed) &&
+              std::find(present_modes.cbegin(), present_modes.cend(),
+                        VK_PRESENT_MODE_FIFO_RELAXED_KHR) != present_modes.cend()) {
+     // Limiting the frame rate, but lets too long frames cause tearing not to

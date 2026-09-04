@@ -1,0 +1,450 @@
+--- a/include/rex/perf/counter.h
++++ b/include/rex/perf/counter.h
+@@ -28,6 +28,22 @@
+   kDrawCalls,
+   kCommandBufferStalls,
+   kVerticesProcessed,
++  kSwapHandlerUs,
++  kGuestOutputRefreshUs,
++  kGuestOutputCallbackUs,
++  kGuestOutputSyncUs,
++  kGpuFenceWaitUs,
++  kGpuEndFrameUs,
++  kGpuEndCachesUs,
++  kGpuDeferredExecuteUs,
++  kGpuQueueSubmitUs,
++  kGpuEndSubmissionUs,
++  kPresentGpuWaitUs,
++  kPresentAcquireUs,
++  kPresentRecordUs,
++  kPresentSubmitUs,
++  kPresentQueueUs,
++  kPresentTotalUs,
+ 
+   // Audio
+   kXmaFramesDecoded,
+@@ -150,6 +166,22 @@
+ #define PROFILE_DRAW_CALL() PERF_counter_inc(kDrawCalls)
+ #define PROFILE_VERTICES(n) PERF_counter_add(kVerticesProcessed, n)
+ #define PROFILE_CMD_BUFFER_STALL() PERF_counter_inc(kCommandBufferStalls)
++#define PROFILE_SWAP_HANDLER_US(value) PERF_counter_add(kSwapHandlerUs, value)
++#define PROFILE_GUEST_OUTPUT_REFRESH_US(value) PERF_counter_add(kGuestOutputRefreshUs, value)
++#define PROFILE_GUEST_OUTPUT_CALLBACK_US(value) PERF_counter_add(kGuestOutputCallbackUs, value)
++#define PROFILE_GUEST_OUTPUT_SYNC_US(value) PERF_counter_add(kGuestOutputSyncUs, value)
++#define PROFILE_GPU_FENCE_WAIT_US(value) PERF_counter_add(kGpuFenceWaitUs, value)
++#define PROFILE_GPU_END_FRAME_US(value) PERF_counter_add(kGpuEndFrameUs, value)
++#define PROFILE_GPU_END_CACHES_US(value) PERF_counter_add(kGpuEndCachesUs, value)
++#define PROFILE_GPU_DEFERRED_EXECUTE_US(value) PERF_counter_add(kGpuDeferredExecuteUs, value)
++#define PROFILE_GPU_QUEUE_SUBMIT_US(value) PERF_counter_add(kGpuQueueSubmitUs, value)
++#define PROFILE_GPU_END_SUBMISSION_US(value) PERF_counter_add(kGpuEndSubmissionUs, value)
++#define PROFILE_PRESENT_GPU_WAIT_US(value) PERF_counter_add(kPresentGpuWaitUs, value)
++#define PROFILE_PRESENT_ACQUIRE_US(value) PERF_counter_add(kPresentAcquireUs, value)
++#define PROFILE_PRESENT_RECORD_US(value) PERF_counter_add(kPresentRecordUs, value)
++#define PROFILE_PRESENT_SUBMIT_US(value) PERF_counter_add(kPresentSubmitUs, value)
++#define PROFILE_PRESENT_QUEUE_US(value) PERF_counter_add(kPresentQueueUs, value)
++#define PROFILE_PRESENT_TOTAL_US(value) PERF_counter_add(kPresentTotalUs, value)
+ #define PROFILE_AUDIO_LATENCY_US(value) PERF_counter_set(kAudioFrameLatencyUs, value)
+ #define PROFILE_BUFFER_QUEUE_DEPTH(value) PERF_counter_set(kBufferQueueDepth, value)
+ #define PROFILE_THREAD_CREATED() PERF_counter_inc(kActiveThreads)
+@@ -175,6 +207,22 @@
+ #define PROFILE_DRAW_CALL()
+ #define PROFILE_VERTICES(n)
+ #define PROFILE_CMD_BUFFER_STALL()
++#define PROFILE_SWAP_HANDLER_US(value)
++#define PROFILE_GUEST_OUTPUT_REFRESH_US(value)
++#define PROFILE_GUEST_OUTPUT_CALLBACK_US(value)
++#define PROFILE_GUEST_OUTPUT_SYNC_US(value)
++#define PROFILE_GPU_FENCE_WAIT_US(value)
++#define PROFILE_GPU_END_FRAME_US(value)
++#define PROFILE_GPU_END_CACHES_US(value)
++#define PROFILE_GPU_DEFERRED_EXECUTE_US(value)
++#define PROFILE_GPU_QUEUE_SUBMIT_US(value)
++#define PROFILE_GPU_END_SUBMISSION_US(value)
++#define PROFILE_PRESENT_GPU_WAIT_US(value)
++#define PROFILE_PRESENT_ACQUIRE_US(value)
++#define PROFILE_PRESENT_RECORD_US(value)
++#define PROFILE_PRESENT_SUBMIT_US(value)
++#define PROFILE_PRESENT_QUEUE_US(value)
++#define PROFILE_PRESENT_TOTAL_US(value)
+ #define PROFILE_AUDIO_LATENCY_US(value)
+ #define PROFILE_BUFFER_QUEUE_DEPTH(value)
+ #define PROFILE_THREAD_CREATED()
+--- a/src/core/perf/counter.cpp
++++ b/src/core/perf/counter.cpp
+@@ -38,6 +38,22 @@
+     "draw_calls",
+     "command_buffer_stalls",
+     "vertices_processed",
++    "swap_handler_us",
++    "guest_output_refresh_us",
++    "guest_output_callback_us",
++    "guest_output_sync_us",
++    "gpu_fence_wait_us",
++    "gpu_end_frame_us",
++    "gpu_end_caches_us",
++    "gpu_deferred_execute_us",
++    "gpu_queue_submit_us",
++    "gpu_end_submission_us",
++    "present_gpu_wait_us",
++    "present_acquire_us",
++    "present_record_us",
++    "present_submit_us",
++    "present_queue_us",
++    "present_total_us",
+     "xma_frames_decoded",
+     "audio_frame_latency_us",
+     "buffer_queue_depth",
+@@ -61,6 +77,22 @@
+     false,  // kDrawCalls
+     false,  // kCommandBufferStalls
+     false,  // kVerticesProcessed
++    false,  // kSwapHandlerUs
++    false,  // kGuestOutputRefreshUs
++    false,  // kGuestOutputCallbackUs
++    false,  // kGuestOutputSyncUs
++    false,  // kGpuFenceWaitUs
++    false,  // kGpuEndFrameUs
++    false,  // kGpuEndCachesUs
++    false,  // kGpuDeferredExecuteUs
++    false,  // kGpuQueueSubmitUs
++    false,  // kGpuEndSubmissionUs
++    false,  // kPresentGpuWaitUs
++    false,  // kPresentAcquireUs
++    false,  // kPresentRecordUs
++    false,  // kPresentSubmitUs
++    false,  // kPresentQueueUs
++    false,  // kPresentTotalUs
+     false,  // kXmaFramesDecoded
+     false,  // kAudioFrameLatencyUs
+     false,  // kBufferQueueDepth  (set each frame)
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -1110,7 +1110,16 @@
+   uint32_t frontbuffer_height = reader->ReadAndSwap<uint32_t>();
+   reader->AdvanceRead((count - 4) * sizeof(uint32_t));
+ 
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++  const uint64_t swap_start_tick = rex::chrono::Clock::QueryHostTickCount();
++#endif
+   IssueSwap(frontbuffer_ptr, frontbuffer_width, frontbuffer_height);
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++  const uint64_t swap_elapsed_ticks =
++      rex::chrono::Clock::QueryHostTickCount() - swap_start_tick;
++  PROFILE_SWAP_HANDLER_US(static_cast<int64_t>(
++      swap_elapsed_ticks * 1000000 / rex::chrono::Clock::QueryHostTickFrequency()));
++#endif
+ 
+   ++counter_;
+   return true;
+--- a/src/ui/vulkan/vulkan_presenter.cpp
++++ b/src/ui/vulkan/vulkan_presenter.cpp
+@@ -20,9 +20,11 @@
+ #include <vector>
+ 
+ #include <rex/assert.h>
++#include <rex/chrono/clock.h>
+ #include <rex/cvar.h>
+ #include <rex/logging.h>
+ #include <rex/math.h>
++#include <rex/perf/counter.h>
+ #include <rex/platform.h>
+ #include <rex/ui/vulkan/presenter.h>
+ #include <rex/ui/vulkan/util.h>
+@@ -63,6 +65,19 @@
+ namespace ui {
+ namespace vulkan {
+ 
++namespace {
++
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++uint64_t PerfNow() { return rex::chrono::Clock::QueryHostTickCount(); }
++
++int64_t PerfElapsedUs(uint64_t start_tick) {
++  return static_cast<int64_t>((PerfNow() - start_tick) * 1000000 /
++                              rex::chrono::Clock::QueryHostTickFrequency());
++}
++#endif
++
++}  // namespace
++
+ #if defined(REX_HAS_FIDELITYFX_RUNTIME) && REX_HAS_FIDELITYFX_RUNTIME
+ namespace {
+ 
+@@ -1017,6 +1032,10 @@
+ bool VulkanPresenter::RefreshGuestOutputImpl(
+     uint32_t mailbox_index, uint32_t frontbuffer_width, uint32_t frontbuffer_height,
+     std::function<bool(GuestOutputRefreshContext& context)> refresher, bool& is_8bpc_out_ref) {
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++  const uint64_t refresh_start_tick = PerfNow();
++  int64_t sync_us = 0;
++#endif
+   assert_not_zero(frontbuffer_width);
+   assert_not_zero(frontbuffer_height);
+   VkExtent2D max_framebuffer_extent = util::GetMax2DFramebufferExtent(vulkan_device_->properties());
+@@ -1030,8 +1049,14 @@
+   GuestOutputImageInstance& image_instance = guest_output_images_[mailbox_index];
+   if (image_instance.image && (image_instance.image->extent().width != frontbuffer_width ||
+                                image_instance.image->extent().height != frontbuffer_height)) {
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++    const uint64_t resize_wait_start_tick = PerfNow();
++#endif
+     guest_output_image_refresher_submission_tracker_.AwaitSubmissionCompletion(
+         image_instance.last_refresher_submission);
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++    sync_us += PerfElapsedUs(resize_wait_start_tick);
++#endif
+     image_instance.image.reset();
+   }
+   if (!image_instance.image) {
+@@ -1046,7 +1071,13 @@
+   VulkanGuestOutputRefreshContext context(is_8bpc_out_ref, image_instance.image->image(),
+                                           image_instance.image->view(), image_instance.version,
+                                           image_instance.ever_successfully_refreshed);
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++  const uint64_t callback_start_tick = PerfNow();
++#endif
+   bool refresher_succeeded = refresher(context);
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++  PROFILE_GUEST_OUTPUT_CALLBACK_US(PerfElapsedUs(callback_start_tick));
++#endif
+   if (refresher_succeeded) {
+     image_instance.ever_successfully_refreshed = true;
+   }
+@@ -1062,6 +1093,9 @@
+   //  include in the first synchronization scope all commands that occur earlier
+   //  in submission order."
+   const VulkanDevice::Functions& dfn = vulkan_device_->functions();
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++  const uint64_t signal_start_tick = PerfNow();
++#endif
+   {
+     VulkanSubmissionTracker::FenceAcquisition fence_acqusition(
+         guest_output_image_refresher_submission_tracker_.AcquireFenceToAdvanceSubmission());
+@@ -1072,6 +1106,11 @@
+       fence_acqusition.SubmissionSucceededSignalFailed();
+     }
+   }
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++  sync_us += PerfElapsedUs(signal_start_tick);
++  PROFILE_GUEST_OUTPUT_SYNC_US(sync_us);
++  PROFILE_GUEST_OUTPUT_REFRESH_US(PerfElapsedUs(refresh_start_tick));
++#endif
+ 
+   return refresher_succeeded;
+ }
+@@ -1503,14 +1542,24 @@
+ }
+ 
+ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_drawers) {
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++  const uint64_t present_start_tick = PerfNow();
++  int64_t gpu_wait_us = 0;
++#endif
+   // Begin the submission in place of the one not currently potentially used on
+   // the GPU.
+   uint64_t current_paint_submission_index =
+       paint_context_.submission_tracker.GetCurrentSubmission();
+   uint64_t paint_submission_count = uint64_t(paint_context_.submissions.size());
+   if (current_paint_submission_index >= paint_submission_count) {
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++    const uint64_t gpu_wait_start_tick = PerfNow();
++#endif
+     paint_context_.submission_tracker.AwaitSubmissionCompletion(current_paint_submission_index -
+                                                                 paint_submission_count);
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++    gpu_wait_us += PerfElapsedUs(gpu_wait_start_tick);
++#endif
+   }
+   const PaintContext::Submission& paint_submission =
+       *paint_context_.submissions[current_paint_submission_index % paint_submission_count];
+@@ -1543,9 +1592,16 @@
+ 
+   VkSemaphore acquire_semaphore = paint_submission.acquire_semaphore();
+   uint32_t swapchain_image_index;
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++  const uint64_t acquire_start_tick = PerfNow();
++#endif
+   VkResult acquire_result =
+       dfn.vkAcquireNextImageKHR(device, paint_context_.swapchain, UINT64_MAX, acquire_semaphore,
+                                 VK_NULL_HANDLE, &swapchain_image_index);
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++  PROFILE_PRESENT_ACQUIRE_US(PerfElapsedUs(acquire_start_tick));
++  const uint64_t record_start_tick = PerfNow();
++#endif
+   switch (acquire_result) {
+     case VK_SUCCESS:
+     case VK_SUBOPTIMAL_KHR:
+@@ -2159,6 +2215,10 @@
+   submit_info.pCommandBuffers = command_buffers;
+   submit_info.signalSemaphoreCount = 1;
+   submit_info.pSignalSemaphores = &present_semaphore;
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++  PROFILE_PRESENT_RECORD_US(PerfElapsedUs(record_start_tick));
++  const uint64_t submit_start_tick = PerfNow();
++#endif
+   {
+     VulkanSubmissionTracker::FenceAcquisition fence_acqusition(
+         paint_context_.submission_tracker.AcquireFenceToAdvanceSubmission());
+@@ -2200,6 +2260,9 @@
+       return PaintResult::kNotPresentedConnectionOutdated;
+     }
+   }
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++  PROFILE_PRESENT_SUBMIT_US(PerfElapsedUs(submit_start_tick));
++#endif
+ 
+   VkPresentInfoKHR present_info;
+   present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+@@ -2211,11 +2274,19 @@
+   present_info.pImageIndices = &swapchain_image_index;
+   present_info.pResults = nullptr;
+   VkResult present_result;
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++  const uint64_t queue_present_start_tick = PerfNow();
++#endif
+   {
+     const VulkanDevice::Queue::Acquisition queue_acquisition =
+         vulkan_device_->AcquireQueue(paint_context_.present_queue_family, 0);
+     present_result = dfn.vkQueuePresentKHR(queue_acquisition.queue(), &present_info);
+   }
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++  PROFILE_PRESENT_QUEUE_US(PerfElapsedUs(queue_present_start_tick));
++  PROFILE_PRESENT_GPU_WAIT_US(gpu_wait_us);
++  PROFILE_PRESENT_TOTAL_US(PerfElapsedUs(present_start_tick));
++#endif
+   switch (present_result) {
+     case VK_SUCCESS:
+       return PaintResult::kPresented;
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+index a40436e..e54a605 100644
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -24,10 +24,12 @@
+ #include <SPIRV/GlslangToSpv.h>
+ #include <glslang/Public/ShaderLang.h>
+ #include <rex/assert.h>
++#include <rex/chrono/clock.h>
+ #include <rex/cvar.h>
+ #include <rex/dbg.h>
+ #include <rex/logging.h>
+ #include <rex/math.h>
++#include <rex/perf/counter.h>
+ #include <rex/graphics/util/draw.h>
+ #include <rex/graphics/flags.h>
+ #include <rex/graphics/pipeline/shader/shader.h>
+@@ -5003,9 +5005,17 @@ void VulkanCommandProcessor::CheckSubmissionFenceAndDeviceLoss(uint64_t await_su
+     // defined by vkQueueSubmit additionally include in the first
+     // synchronization scope all commands that occur earlier in submission
+     // order."
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++    const uint64_t fence_wait_start_tick = rex::chrono::Clock::QueryHostTickCount();
++#endif
+     VkResult wait_result =
+         dfn.vkWaitForFences(device, uint32_t(await_submission - submission_completed_),
+                             submissions_in_flight_fences_.data(), VK_TRUE, UINT64_MAX);
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++    PROFILE_GPU_FENCE_WAIT_US(static_cast<int64_t>(
++        (rex::chrono::Clock::QueryHostTickCount() - fence_wait_start_tick) * 1000000 /
++        rex::chrono::Clock::QueryHostTickFrequency()));
++#endif
+     if (wait_result == VK_SUCCESS) {
+       fences_awaited += await_submission - submission_completed_;
+     } else {
+@@ -5263,6 +5273,9 @@ bool VulkanCommandProcessor::BeginSubmission(bool is_guest_command) {
+ }
+ 
+ bool VulkanCommandProcessor::EndSubmission(bool is_swap) {
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++  const uint64_t end_submission_start_tick = rex::chrono::Clock::QueryHostTickCount();
++#endif
+   const ui::vulkan::VulkanDevice* const vulkan_device = GetVulkanDevice();
+   const ui::vulkan::VulkanDevice::Functions& dfn = vulkan_device->functions();
+   const VkDevice device = vulkan_device->device();
+@@ -5327,9 +5340,17 @@ bool VulkanCommandProcessor::EndSubmission(bool is_swap) {
+   bool is_closing_frame = is_swap && frame_open_;
+ 
+   if (is_closing_frame) {
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++    const uint64_t end_frame_start_tick = rex::chrono::Clock::QueryHostTickCount();
++#endif
+     texture_cache_->EndFrame();
+ 
+     primitive_processor_->EndFrame();
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++    PROFILE_GPU_END_FRAME_US(static_cast<int64_t>(
++        (rex::chrono::Clock::QueryHostTickCount() - end_frame_start_tick) * 1000000 /
++        rex::chrono::Clock::QueryHostTickFrequency()));
++#endif
+   }
+ 
+   if (submission_open_) {
+@@ -5341,6 +5362,9 @@ bool VulkanCommandProcessor::EndSubmission(bool is_swap) {
+       active_occlusion_query_ = {};
+     }
+ 
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++    const uint64_t end_caches_start_tick = rex::chrono::Clock::QueryHostTickCount();
++#endif
+     EndRenderPass();
+ 
+     pipeline_cache_->EndSubmission();
+@@ -5352,6 +5376,11 @@ bool VulkanCommandProcessor::EndSubmission(bool is_swap) {
+     shared_memory_->EndSubmission();
+ 
+     uniform_buffer_pool_->FlushWrites();
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++    PROFILE_GPU_END_CACHES_US(static_cast<int64_t>(
++        (rex::chrono::Clock::QueryHostTickCount() - end_caches_start_tick) * 1000000 /
++        rex::chrono::Clock::QueryHostTickFrequency()));
++#endif
+ 
+     // Submit sparse binds earlier, before executing the deferred command
+     // buffer, to reduce latency.
+@@ -5418,7 +5447,15 @@ bool VulkanCommandProcessor::EndSubmission(bool is_swap) {
+       REXGPU_ERROR("Failed to begin a Vulkan command buffer");
+       return false;
+     }
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++    const uint64_t deferred_execute_start_tick = rex::chrono::Clock::QueryHostTickCount();
++#endif
+     deferred_command_buffer_.Execute(command_buffer.buffer);
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++    PROFILE_GPU_DEFERRED_EXECUTE_US(static_cast<int64_t>(
++        (rex::chrono::Clock::QueryHostTickCount() - deferred_execute_start_tick) * 1000000 /
++        rex::chrono::Clock::QueryHostTickFrequency()));
++#endif
+     if (dfn.vkEndCommandBuffer(command_buffer.buffer) != VK_SUCCESS) {
+       REXGPU_ERROR("Failed to end a Vulkan command buffer");
+       return false;
+@@ -5447,11 +5484,19 @@ bool VulkanCommandProcessor::EndSubmission(bool is_swap) {
+       return false;
+     }
+     VkResult submit_result;
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++    const uint64_t queue_submit_start_tick = rex::chrono::Clock::QueryHostTickCount();
++#endif
+     {
+       ui::vulkan::VulkanDevice::Queue::Acquisition queue_acquisition =
+           vulkan_device->AcquireQueue(vulkan_device->queue_family_graphics_compute(), 0);
+       submit_result = dfn.vkQueueSubmit(queue_acquisition.queue(), 1, &submit_info, fence);
+     }
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++    PROFILE_GPU_QUEUE_SUBMIT_US(static_cast<int64_t>(
++        (rex::chrono::Clock::QueryHostTickCount() - queue_submit_start_tick) * 1000000 /
++        rex::chrono::Clock::QueryHostTickFrequency()));
++#endif
+     if (submit_result != VK_SUCCESS) {
+       REXGPU_ERROR("Failed to submit a Vulkan command buffer");
+       if (submit_result == VK_ERROR_DEVICE_LOST && !device_lost_) {
+@@ -5518,6 +5563,11 @@ bool VulkanCommandProcessor::EndSubmission(bool is_swap) {
+     }
+   }
+ 
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++  PROFILE_GPU_END_SUBMISSION_US(static_cast<int64_t>(
++      (rex::chrono::Clock::QueryHostTickCount() - end_submission_start_tick) * 1000000 /
++      rex::chrono::Clock::QueryHostTickFrequency()));
++#endif
+   return true;
+ }
+ 
