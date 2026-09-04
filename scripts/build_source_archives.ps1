@@ -62,9 +62,7 @@ try {
         -File -Force -Recurse | ForEach-Object {
             Remove-Item -LiteralPath $_.FullName -Force
         }
-    Move-Item -LiteralPath $CheckoutDirectory -Destination $StageDirectory
-
-    $ForbiddenFiles = Get-ChildItem -LiteralPath $StageDirectory `
+    $ForbiddenFiles = Get-ChildItem -LiteralPath $CheckoutDirectory `
         -File -Force -Recurse | Where-Object {
             $_.Name -in @("default.xex", "default.xexp") -or
             $_.Extension -ieq ".iso"
@@ -83,11 +81,18 @@ try {
         }
     }
 
+    Move-Item -LiteralPath $CheckoutDirectory -Destination $StageDirectory
     Compress-Archive -LiteralPath $StageDirectory `
         -DestinationPath $ZipPath -CompressionLevel Optimal
 
     $TarCommand = Get-TarCommand
-    & $TarCommand -czf $TarPath -C $TemporaryRoot $ArchiveName
+    if ($env:OS -eq "Windows_NT") {
+        Move-Item -LiteralPath $StageDirectory -Destination $CheckoutDirectory
+        & $TarCommand -czf $TarPath -C $TemporaryRoot `
+            "--transform=s,^r,$ArchiveName," "r"
+    } else {
+        & $TarCommand -czf $TarPath -C $TemporaryRoot $ArchiveName
+    }
     if ($LASTEXITCODE) {
         throw "Creating the tar.gz archive failed with exit code $LASTEXITCODE."
     }
